@@ -1,2 +1,5 @@
-# ficrecommend
-A FanFiction story recommendation service.
+# Fic Recommend
+
+A simple fanfiction recommendation service.
+
+https://fn.lc/ficrecommend

@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+message User {
+  string id = 1;
+  bool exists = 2;
+  string name = 3;
+  repeated string stories = 4;
+  repeated string fav_stories = 5;
+  repeated string fav_authors = 6;
+  repeated string faved_by = 7;
+  Site site = 8;
+}
+
+enum Site {
+  FFNET = 0;
+  AO3 = 1;
+}
+
+message Story {
+  int32 id = 1;
+  string title = 2;
+  string category = 3;
+  string image = 4;
+  string desc = 5;
+  string url = 6;
+  string dl = 7;
+  int32 word_count = 8;
+  int32 date_submit = 9;
+  int32 date_update = 10;
+  int32 reviews = 11;
+  int32 chapters = 12;
+  bool complete = 13;
+  repeated string faved_by = 14;
+  Site site = 15;
+  bool exists = 16;
+}
