@@ -253,7 +253,7 @@ Copy
         offset = 0;
         $filter.val('');
         index = lunr(function () {
-          this.field('title', {boost: 10});
+          this.field('title');
           this.field('desc');
           this.ref('id');
         })
