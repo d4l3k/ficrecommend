@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/boltdb/bolt"
 )
@@ -19,7 +20,7 @@ import (
 func (s *Story) annotate() {
 	switch s.Site {
 	case Site_FFNET:
-		s.Url = "https://www.fanfiction.net/s/" + itoa(s.Id) + "/" + s.Title
+		s.Url = "https://www.fanfiction.net/s/" + itoa(s.Id) + "/" + strings.Replace(s.Title, " ", "-", -1)
 		s.Dl = "http://ficsave.com/?format=epub&e=&auto_download=yes&story_url=" + s.Url
 	case Site_AO3:
 		s.Url = "https://archiveofourown.org/works/" + itoa(s.Id)

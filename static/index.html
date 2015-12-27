@@ -36,6 +36,7 @@
       right: 0;
       bottom: 0;
       overflow: auto;
+      overflow-x: hidden;
     }
     #stations {
       width: 400px;
@@ -72,13 +73,17 @@
     }
     div.input-field.filter-field {
       padding-left: 0;
+      padding-right: 0;
       margin: 0;
     }
     div.input-field.filter-field input {
       margin-bottom: 0;
     }
-    .card .row {
-      margin-bottom: 0;
+    .card div.row {
+      margin: 0;
+    }
+    .card div.row .col {
+      padding-left: 0;
     }
     @media (max-width: 600px) {
       #container .container {
