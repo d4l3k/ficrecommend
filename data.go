@@ -1,12 +1,15 @@
 package main
 
 import (
+	"errors"
 	"log"
 	"strconv"
 
 	"github.com/boltdb/bolt"
 	"github.com/golang/protobuf/proto"
 )
+
+var errStoryNotFound = errors.New("story not found in database")
 
 func userByKey(key string) *User {
 	return &User{
@@ -92,18 +95,17 @@ func (s *Story) save(db *bolt.DB) error {
 	})
 }
 
-func recommendationStory(db *bolt.DB, s *Story, limit int) *recResp {
+func recommendationStory(db *bolt.DB, s *Story, limit, offset int) (*recResp, error) {
 	var sOut []*Story
 	var uOut []*User
 	if !s.update(db) {
-		log.Println("Failed to find story.")
-		return nil
+		return nil, errStoryNotFound
 	}
 	log.Printf("Finding recommendations for \"%s\"...", s.Title)
 	usersSeen := make(map[string]bool)
 	recStories := make(map[string]int)
 	//recAuthors := make(map[int]int)
-	db.View(func(tx *bolt.Tx) error {
+	err := db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte("users"))
 		bstories := tx.Bucket([]byte("stories"))
 		for _, userID := range s.FavedBy {
@@ -117,27 +119,24 @@ func recommendationStory(db *bolt.DB, s *Story, limit int) *recResp {
 			for _, storyID := range u.FavStories {
 				recStories[storyID]++
 			}
-			/*
-				for _, authorId := range u.FavAuthors {
-					recAuthors[authorId]++
-				}*/
 		}
-		//ral := sortMap(recAuthors, limit)
-		rsl := sortMap(recStories, limit)
-		if len(rsl) > 1 {
+		rsl := sortMap(recStories, limit+offset)
+		if len(rsl) > 1 && rsl[0] == string(s.key()) {
 			rsl = rsl[1:]
 		}
-		if len(rsl) > limit {
-			rsl = rsl[:limit]
+		if len(rsl) > (limit + offset) {
+			rsl = rsl[offset : offset+limit]
+		} else if len(rsl) > offset {
+			rsl = rsl[offset:]
+		} else {
+			rsl = nil
 		}
-		/*
-			if len(ral) > limit {
-				ral = ral[:limit]
-			}*/
 		sOut = fetchStories(bstories, rsl)
-		//uOut = fetchUsers(b, ral)
 		return nil
 	})
+	if err != nil {
+		return nil, err
+	}
 	for _, st := range sOut {
 		st.FavedBy = nil
 		st.annotate()
@@ -151,5 +150,5 @@ func recommendationStory(db *bolt.DB, s *Story, limit int) *recResp {
 		uOut,
 		s,
 	}
-	return resp
+	return resp, nil
 }

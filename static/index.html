@@ -23,6 +23,9 @@
     #stories {
       background-color: rgba(255,255,255,0.6) !important;
     }
+    .error {
+      color: red;
+    }
     .input-field label {
       left: 0 !important;
     }
@@ -67,15 +70,22 @@
     #stories-col .collection-item {
       height: auto;
     }
+    div.input-field.filter-field {
+      padding-left: 0;
+      margin: 0;
+    }
+    div.input-field.filter-field input {
+      margin-bottom: 0;
+    }
+    .card .row {
+      margin-bottom: 0;
+    }
     @media (max-width: 600px) {
       #container .container {
         width: 100%;
       }
       .card {
         padding: 0 !important;
-      }
-      .card-title {
-        line-height: 32px !important;
       }
       .header {
         font-size: 3.5rem !important;
@@ -84,7 +94,7 @@
   </style>
   <title>Fic Recommend by Tristan Rice</title>
   <!-- Compiled and minified CSS -->
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/materialize/0.96.1/css/materialize.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/materialize/0.97.5/css/materialize.min.css">
 </head>
 <body>
   <canvas id="background"></canvas>
@@ -97,9 +107,10 @@
           <div class="card-content">
             <span class="card-title grey-text text-darken-4">Enter a FF.net or AO3 URL</span>
             <div class="input-field">
-              <input id="url" type="text" class="validate">
-              <label for="url">Story</label>
+              <input id="url" type="url" class="validate">
+              <label for="url" data-error="Invalid URL">Story</label>
             </div>
+            <div class="error" style="display: none;"></div>
             <center>
               <button id="rec" class="btn waves-effect waves-light btn-large" type="submit" name="action">Recommend
                 <i class="mdi-content-send right"></i>
@@ -128,9 +139,25 @@
             <span class="card-title grey-text text-darken-4">Input</span>
             <ul class="collection" id="input-col">
             </ul>
-            <span class="card-title grey-text text-darken-4">Recommended Stories</span>
+            <div class="row">
+              <span class="card-title grey-text text-darken-4 col s6">
+                Recommended Stories
+              </span>
+              <div class="input-field col s6 filter-field">
+                <input id="filter" type="text" >
+                <label for="filter">Filter</label>
+              </div>
+            </div>
             <ul class="collection" id="stories-col">
             </ul>
+            <center>
+              <button id="more" class="btn waves-effect waves-light" type="submit" name="action">
+                More Stories
+              </button>
+            </center>
+            <div class="progress" style="display: none;">
+              <div class="indeterminate"></div>
+            </div>
           </div>
         </div>
       </div>
@@ -147,18 +174,26 @@
   </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/2.1.3/jquery.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/materialize/0.96.1/js/materialize.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/materialize/0.97.5/js/materialize.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/trianglify/0.2.0/trianglify.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/lodash.js/3.7.0/lodash.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/lunr.js/0.6.0/lunr.min.js"></script>
+Copy
 <script>
   'use strict';
   var backgrounds = [
     document.getElementById('background'),
     document.getElementById('background2'),
   ];
+  var endpoint = 'api/v1/recommendation';
   var lastCanvas = 0;
   var songs = [];
   var curSong = 0;
+
+  // If '?prod' is appended to URL, point to prod.
+  if (window.location.search === "?prod") {
+    endpoint = 'https://fn.lc/ficrecommend/' + endpoint;
+  }
   function renderBackground(first){
     var pattern = Trianglify({
         width: window.innerWidth,
@@ -194,31 +229,93 @@
       '</p>'+
     '</li>';
   }
-  function goToPath(path) {
+  function hide(elem) {
+    elem.animate({opacity: 'hide', height: 'hide'});
+  }
+  function show(elem) {
+    elem.animate({opacity: 'show', height: 'show'});
+  }
+  var curOffset = 0;
+  var stories = [];
+  var index;
+  function goToPath(path, offset) {
     if (_.startsWith(path, '/story/')) {
       var stationId = _.trimLeft(path, '/story/')
       $("#url").val(stationId);
 
-      $('#stories').animate({opacity: 'hide', height: 'hide'});
-      $('.progress').animate({opacity: 'show', height: 'show'});
 
-      $.get("api/v1/recommendation?id="+stationId, function(data) {
-        data = JSON.parse(data) || {};
-        console.log("recommendation", data);
-        var html = "";
-        _.each(data.Stories, function(story) {
-          html += storyElement(story);
+      var $error = $('.error');
+      var $filter = $('#filter');
+
+      if (!offset) {
+        hide($('#stories'));
+        stories = [];
+        offset = 0;
+        $filter.val('');
+        index = lunr(function () {
+          this.field('title', {boost: 10});
+          this.field('desc');
+          this.ref('id');
+        })
+      }
+      hide($error);
+
+      curOffset = offset;
+
+      if (stationId.length == 0) {
+        hide($('.progress'));
+        return;
+      }
+      show($('.progress'));
+
+
+      $.getJSON(endpoint+'?callback=?&id='+stationId+'&offset='+offset).done(function(data) {
+        console.log('recommendation', data);
+        _.each(data.Stories, function(story, i) {
+          index.add({
+            id: i+stories.length,
+            title: story.title,
+            desc: story.desc,
+          });
         });
-        $('#stories-col').html(html);
+        stories = stories.concat(data.Stories);
         $('#input-col').html(storyElement(data.Story || {}));
-
-        $('#stories').animate({opacity: 'show', height: 'show'});
-        $('.progress').animate({opacity: 'hide', height: 'hide'});
-      })
+        renderStories();
+        show($('#stories'));
+      }).fail(function(data) {
+        console.log(data);
+        $error.text(data.responseText);
+        show($error);
+      }).always(function() {
+        hide($('.progress'));
+      });
     } else {
       return;
     }
     renderBackground();
+  }
+  function renderStories() {
+    var $filter = $('#filter');
+    var query = $filter.val().trim();
+    var dispStories = [];
+    if (query.length == 0) {
+      dispStories = stories;
+    } else {
+      var searchResults = index.search(query);
+      _.each(searchResults, function(result) {
+        dispStories.push(stories[result.ref]);
+      });
+    }
+    var html = '';
+    _.each(dispStories, function(story) {
+      html += storyElement(story);
+    });
+    $('#stories-col').html(html);
+  }
+  $('#filter').keydown(_.debounce(renderStories, 300));
+  function more() {
+    curOffset += 100;
+    goToPath(window.location.hash.substr(1), curOffset);
   }
   function recommend() {
     var val = $('#url').val();
@@ -227,7 +324,7 @@
     goToPath(newPath);
   }
 
-  $("#rec").click(recommend);
+  $('#rec').click(recommend);
 
   var timeout;
   $(window).resize(function() {
@@ -237,6 +334,9 @@
     }, 300);
   });
 
+  $('#more').click(function() {
+    more();
+  });
   $('#url').keypress(function (e) {
     if (e.which == 13) {
       recommend();

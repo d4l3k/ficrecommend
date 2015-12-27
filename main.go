@@ -85,12 +85,13 @@ func (a *storySlice) Len() int           { return len(a.arr) }
 func (a *storySlice) Swap(i, j int)      { a.arr[i], a.arr[j] = a.arr[j], a.arr[i] }
 func (a *storySlice) Less(i, j int) bool { return a.m[a.arr[i]] > a.m[a.arr[j]] }
 
+// sortMap returns the top limit items in a map.
 func sortMap(m map[string]int, limit int) []string {
 	ss := &storySlice{
 		m: m,
 	}
-	for k, v := range m {
-		if len(ss.arr) > limit && v == 1 {
+	for k, priority := range m {
+		if len(ss.arr) > limit && priority <= 1 {
 			continue
 		}
 		ss.arr = append(ss.arr, k)
@@ -119,16 +120,19 @@ func fetchUsers(b *bolt.Bucket, keys []string) []*User {
 	return users
 }
 
-var recommenders []func(db *bolt.DB, url string, limit int) *recResp
+var recommenders []func(db *bolt.DB, url string, limit, offset int) (*recResp, error)
 
-func recommendations(db *bolt.DB, url string, limit int) *recResp {
+func recommendations(db *bolt.DB, url string, limit, offset int) (*recResp, error) {
 	for _, rec := range recommenders {
-		resp := rec(db, url, limit)
-		if resp != nil {
-			return resp
+		resp, err := rec(db, url, limit, offset)
+		if err == errStoryNotFound {
+			continue
+		} else if err != nil {
+			return nil, err
 		}
+		return resp, nil
 	}
-	return nil
+	return nil, errStoryNotFound
 }
 
 var scrapers []func(db *bolt.DB)
@@ -140,7 +144,11 @@ func cmdScrape(db *bolt.DB) {
 }
 
 func cmdRecommend(db *bolt.DB, id string) {
-	recs := recommendations(db, id, 20)
+	recs, err := recommendations(db, id, 20, 0)
+	if err != nil {
+		log.Print(err)
+		return
+	}
 	log.Printf("Recommended stories:")
 	for _, st := range recs.Stories {
 		log.Printf("  %s (%v)", st.Title, st.Id)
@@ -163,10 +171,50 @@ type recResp struct {
 	Story   *Story
 }
 
+func requestFormInt(r *http.Request, field string, def int) int {
+	val := r.FormValue(field)
+	if len(val) == 0 {
+		return def
+	}
+	num, err := strconv.Atoi(val)
+	if err != nil {
+		return def
+	}
+	return num
+}
+
 func handleRecommendation(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
 	id := r.FormValue("id")
-	resp := recommendations(bdb, id, 100)
-	json.NewEncoder(w).Encode(resp)
+	limit := requestFormInt(r, "limit", 100)
+	offset := requestFormInt(r, "offset", 0)
+	if limit > 200 || limit < 0 {
+		http.Error(w, "limit must be  <= 200 && >= 0", 400)
+		return
+	}
+	if offset < 0 {
+		http.Error(w, "offset must be  >= 0", 400)
+		return
+	}
+	resp, err := recommendations(bdb, id, limit, offset)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+
+	jsonBytes, err := json.Marshal(resp)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	callback := r.FormValue("callback")
+	if callback != "" {
+		fmt.Fprintf(w, "%s(%s)", callback, jsonBytes)
+	} else {
+		w.Write(jsonBytes)
+	}
 }
 
 var (

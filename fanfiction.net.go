@@ -20,16 +20,16 @@ func init() {
 
 var ffnetRegex = regexp.MustCompile(`^https?:\/\/.*fanfiction\.net\/s\/(\d+).*$`)
 
-func recommendFFnet(db *bolt.DB, url string, limit int) *recResp {
+func recommendFFnet(db *bolt.DB, url string, limit, offset int) (*recResp, error) {
 	if matches := ffnetRegex.FindStringSubmatch(url); len(matches) == 2 {
 		s := &Story{
 			Id:   atoi(matches[1]),
 			Site: Site_FFNET,
 		}
-		return recommendationStory(db, s, limit)
+		return recommendationStory(db, s, limit, offset)
 
 	}
-	return nil
+	return nil, errStoryNotFound
 }
 
 func scrapeFFnet(db *bolt.DB) {

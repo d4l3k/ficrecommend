@@ -19,15 +19,15 @@ func init() {
 
 var ao3Regex = regexp.MustCompile(`^https?:\/\/archiveofourown.org\/works\/(\d+).*$`)
 
-func recommendAO3(db *bolt.DB, url string, limit int) *recResp {
+func recommendAO3(db *bolt.DB, url string, limit, offset int) (*recResp, error) {
 	if matches := ao3Regex.FindStringSubmatch(url); len(matches) == 2 {
 		s := &Story{
 			Id:   atoi(matches[1]),
 			Site: Site_AO3,
 		}
-		return recommendationStory(db, s, limit)
+		return recommendationStory(db, s, limit, offset)
 	}
-	return nil
+	return nil, errStoryNotFound
 }
 
 func scrapeAO3(db *bolt.DB) {
