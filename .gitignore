@@ -1,4 +1,3 @@
-*.pb.go
 *.db
 ficrecommend
 recommender.leveldb
