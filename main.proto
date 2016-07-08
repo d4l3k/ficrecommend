@@ -29,6 +29,7 @@ message Story {
   int32 date_update = 10;
   int32 reviews = 11;
   int32 chapters = 12;
+  int32 favorites = 17;
   bool complete = 13;
   repeated string faved_by = 14;
   Site site = 15;

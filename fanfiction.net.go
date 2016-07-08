@@ -92,10 +92,12 @@ func scrapeFFnet(s *server) {
 		}
 		fetched++
 		if u.Exists {
-			log.Println("Fetched FF.net", u.Name, u.Id)
+			log.Printf("Fetched FF.net %8s %q", u.Id, u.Name)
 		}
 	}
 }
+
+var ffFavCountRegex = regexp.MustCompile(`Favs: ([0-9,]+) -`)
 
 func (u *User) fetch(doc *goquery.Document, sr *server) error {
 	if doc.Find("#bio_text").Length() != 1 {
@@ -110,7 +112,6 @@ func (u *User) fetch(doc *goquery.Document, sr *server) error {
 	}
 	for _, typ := range []string{".favstories", ".mystories"} {
 		doc.Find(typ).Each(func(i int, s *goquery.Selection) {
-			html, _ := s.Find("div").First().Html()
 			st.Id = atoi(s.AttrOr("data-storyid", ""))
 			st.Category = s.AttrOr("data-category", "")
 			st.Title = s.AttrOr("data-title", "")
@@ -121,7 +122,16 @@ func (u *User) fetch(doc *goquery.Document, sr *server) error {
 			st.Chapters = atoi(s.AttrOr("data-chapters", ""))
 			st.Complete = s.AttrOr("data-statusid", "") == "2"
 			st.Image = s.Find("img").AttrOr("data-original", "")
+
+			contentDiv := s.Find("div").First()
+			html, _ := contentDiv.Html()
 			st.Desc = html
+			meta := contentDiv.Find("div").Text()
+			matches := ffFavCountRegex.FindStringSubmatch(meta)
+			if len(matches) == 2 {
+				st.Favorites = atoi(strings.Replace(matches[1], ",", "", -1))
+			}
+
 			if !st.checkExistsTitle(sr.graph) {
 				err = st.save(sr)
 				if err != nil {

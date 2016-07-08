@@ -51,6 +51,7 @@ const (
 	StoryDateSubmit  = storyPrefix + "date_submit"
 	StoryDateUpdate  = storyPrefix + "date_update"
 	StoryReviewCount = storyPrefix + "review_count"
+	StoryFavorites   = storyPrefix + "favorites"
 	StoryChapters    = storyPrefix + "chapters"
 	StoryComplete    = storyPrefix + "complete"
 	StoryFavoritedBy = storyPrefix + "favorited_by"
@@ -140,6 +141,7 @@ func (s Story) save(sr *server) error {
 		txn.AddQuad(quad.Quad{Subject: id, Predicate: StoryDateUpdate, Object: itoa(s.DateUpdate)})
 		txn.AddQuad(quad.Quad{Subject: id, Predicate: StoryReviewCount, Object: itoa(s.Reviews)})
 		txn.AddQuad(quad.Quad{Subject: id, Predicate: StoryChapters, Object: itoa(s.Chapters)})
+		txn.AddQuad(quad.Quad{Subject: id, Predicate: StoryFavorites, Object: itoa(s.Favorites)})
 		txn.AddQuad(quad.Quad{Subject: id, Predicate: StoryComplete, Object: strconv.FormatBool(s.Complete)})
 		for _, by := range s.FavedBy {
 			txn.AddQuad(quad.Quad{Subject: id, Predicate: StoryFavoritedBy, Object: by})

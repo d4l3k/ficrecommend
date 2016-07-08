@@ -147,7 +147,7 @@ func scrapeAO3(sr *server) {
 			continue
 		}
 		bad = 0
-		log.Println("Fetched AO3 ", s.Title, s.Id, fetched, total)
+		log.Printf("Fetched AO3 %8d %q %d %d", s.Id, s.Title, fetched, total)
 	}
 }
 
@@ -177,10 +177,11 @@ func fetchAO3(s *Story, doc *goquery.Document, sr *server) error {
 			return
 		}
 
+		s.Favorites++
+
 		name := strings.ToLower(sel.Text())
 		u.Id = name
 		u.Name = name
-		s.FavedBy = []string{u.key()}
 		u.FavStories = []string{s.key()}
 		if !u.checkExists(sr.graph) {
 			err = u.save(sr)
