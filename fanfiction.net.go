@@ -54,7 +54,7 @@ func scrapeFFnet(s *server) {
 					log.Println(err)
 					continue
 				}
-				if statusCode != http.StatusOK {
+				if statusCode != http.StatusOK && statusCode != http.StatusNotFound {
 					log.Printf("fetch %q status code = %d", url, statusCode)
 					continue
 				}
