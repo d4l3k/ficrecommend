@@ -32,7 +32,7 @@ func recommendFFnet(s *server, url string, limit, offset int) (recResp, error) {
 
 func scrapeFFnet(s *server) {
 	log.Println("Scraping fanfiction.net...")
-	total := 6832538
+	total := 8043930
 	fetched := 1
 	jobs := make(chan *User)
 

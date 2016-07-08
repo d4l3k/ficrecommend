@@ -6,7 +6,9 @@ import (
 	"log"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/valyala/fasthttp"
@@ -30,10 +32,47 @@ func recommendAO3(sr *server, url string, limit, offset int) (recResp, error) {
 	return recResp{}, errStoryNotFound
 }
 
+func getLatestAO3() (int, error) {
+	doc, err := goquery.NewDocument("https://archiveofourown.org/works")
+	if err != nil {
+		return 0, err
+	}
+	bestTotal := 0
+	doc.Find(".work .heading a").Each(func(i int, s *goquery.Selection) {
+		bits := strings.Split(s.AttrOr("href", ""), "/")
+		total, _ := strconv.Atoi(bits[len(bits)-1])
+		if total > bestTotal {
+			bestTotal = total
+		}
+	})
+	if bestTotal == 0 {
+		return 0, errors.New("failed to determine AO3 latest work")
+	}
+	return bestTotal, nil
+}
+
 func scrapeAO3(sr *server) {
 	log.Println("Scraping archiveofourown.org...")
 	fetched := 1
-	total := 4200000
+	total := 0
+
+	go func() {
+		ticker := time.NewTicker(10 * time.Minute)
+		for {
+			newTotal, err := getLatestAO3()
+			if err != nil {
+				log.Print(err)
+				time.Sleep(time.Second)
+				continue
+			}
+			if newTotal > total {
+				total = newTotal
+			}
+			log.Printf("Latest AO3 work %d", total)
+			// Wait for ticker.
+			<-ticker.C
+		}
+	}()
 
 	type job struct {
 		s   *Story
@@ -74,6 +113,10 @@ func scrapeAO3(sr *server) {
 	// Creates jobs
 	go func() {
 		for {
+			if int(i) > total {
+				time.Sleep(time.Second)
+				continue
+			}
 			if bad > 5000 {
 				return
 			}
