@@ -17,6 +17,14 @@ const (
 	SiteID = "/site/id"
 )
 
+// Types
+const (
+	typePrefix = "/type/"
+	TypeType   = typePrefix + "type"
+	TypeUser   = typePrefix + "user"
+	TypeStory  = typePrefix + "story"
+)
+
 // User type properties.
 const (
 	userPrefix         = "/user/"
@@ -33,6 +41,7 @@ const (
 	storyPrefix      = "/story/"
 	StoryID          = storyPrefix + "id"
 	StoryTitle       = storyPrefix + "title"
+	StoryAuthor      = storyPrefix + "author"
 	StoryCategory    = storyPrefix + "category"
 	StoryImage       = storyPrefix + "image"
 	StoryDescription = storyPrefix + "description"
@@ -47,39 +56,39 @@ const (
 	StoryFavoritedBy = storyPrefix + "favorited_by"
 )
 
-func userByKey(key string) *User {
-	panic("not ported to cayley")
-	return &User{
-		Id:   key[2:],
-		Site: Site(atoi(key[:1])),
-	}
-}
-
-func (u *User) checkExists(g *cayley.Handle) bool {
+func (u User) checkExists(g *cayley.Handle) bool {
 	it, _ := cayley.StartPath(g, u.key()).Out(UserID).BuildIterator().Optimize()
 	defer it.Close()
 	return cayley.RawNext(it)
 }
 
-func (s *Story) checkExists(g *cayley.Handle) bool {
+func (s Story) checkExists(g *cayley.Handle) bool {
 	it, _ := cayley.StartPath(g, s.key()).Out(StoryID).BuildIterator().Optimize()
 	defer it.Close()
 	return cayley.RawNext(it)
 }
 
-func (u *User) key() string {
+func (s Story) checkExistsTitle(g *cayley.Handle) bool {
+	it, _ := cayley.StartPath(g, s.key()).Out(StoryTitle).BuildIterator().Optimize()
+	defer it.Close()
+	return cayley.RawNext(it)
+}
+
+func (u User) key() string {
 	return "user:" + Site_name[int32(u.Site)] + ":" + u.Id
 }
 
-func (u *User) save(s *server) error {
+func (u User) save(s *server) error {
 	id := u.key()
 	txn := graph.NewTransaction()
+	txn.AddQuad(quad.Quad{Subject: id, Predicate: TypeType, Object: TypeUser})
 	txn.AddQuad(quad.Quad{Subject: id, Predicate: UserID, Object: u.Id})
 	txn.AddQuad(quad.Quad{Subject: id, Predicate: SiteID, Object: Site_name[int32(u.Site)]})
 	if u.Exists {
 		txn.AddQuad(quad.Quad{Subject: id, Predicate: UserName, Object: u.Name})
 		for _, story := range u.Stories {
 			txn.AddQuad(quad.Quad{Subject: id, Predicate: UserStory, Object: story})
+			txn.AddQuad(quad.Quad{Subject: story, Predicate: StoryAuthor, Object: id})
 		}
 		for _, story := range u.FavStories {
 			txn.AddQuad(quad.Quad{Subject: id, Predicate: UserFavoriteStory, Object: story})
@@ -87,16 +96,14 @@ func (u *User) save(s *server) error {
 		}
 		for _, author := range u.FavAuthors {
 			txn.AddQuad(quad.Quad{Subject: id, Predicate: UserFavoriteAuthor, Object: author})
-		}
-		for _, by := range u.FavedBy {
-			txn.AddQuad(quad.Quad{Subject: id, Predicate: UserFavoritedBy, Object: by})
+			txn.AddQuad(quad.Quad{Subject: author, Predicate: UserFavoritedBy, Object: id})
 		}
 	}
 	return s.graph.ApplyTransaction(txn)
 }
 
-func storyByKey(g *cayley.Handle, key string) *Story {
-	s := &Story{}
+func storyByKey(g *cayley.Handle, key string) Story {
+	s := Story{}
 	it, _ := cayley.StartPath(g, key).Save(StoryID, StoryID).Save(StoryTitle, StoryTitle).Save(StoryDescription, StoryDescription).Save(StoryURL, StoryURL).Save(SiteID, SiteID).BuildIterator().Optimize()
 	defer it.Close()
 	log.Printf("storyByKey it")
@@ -113,13 +120,14 @@ func storyByKey(g *cayley.Handle, key string) *Story {
 	return s
 }
 
-func (s *Story) key() string {
+func (s Story) key() string {
 	return "story:" + Site_name[int32(s.Site)] + ":" + itoa(s.Id)
 }
 
-func (s *Story) save(sr *server) error {
+func (s Story) save(sr *server) error {
 	id := s.key()
 	txn := graph.NewTransaction()
+	txn.AddQuad(quad.Quad{Subject: id, Predicate: TypeType, Object: TypeStory})
 	txn.AddQuad(quad.Quad{Subject: id, Predicate: StoryID, Object: itoa(s.Id)})
 	txn.AddQuad(quad.Quad{Subject: id, Predicate: SiteID, Object: Site_name[int32(s.Site)]})
 	if s.Exists {
@@ -143,11 +151,11 @@ func (s *Story) save(sr *server) error {
 	return sr.graph.ApplyTransaction(txn)
 }
 
-func recommendationStory(sr *server, s *Story, limit, offset int) (*recResp, error) {
+func recommendationStory(sr *server, s Story, limit, offset int) (recResp, error) {
 	var sOut []*Story
 	var uOut []*User
 	if !s.checkExists(sr.graph) {
-		return nil, errStoryNotFound
+		return recResp{}, errStoryNotFound
 	}
 	s = storyByKey(sr.graph, s.key())
 	log.Printf("Finding recommendations for \"%s\"...", s.Title)
@@ -181,10 +189,10 @@ func recommendationStory(sr *server, s *Story, limit, offset int) (*recResp, err
 		st.FavedBy = nil
 	}
 	s.annotate()
-	resp := &recResp{
+	resp := recResp{
 		sOut,
 		uOut,
-		s,
+		&s,
 	}
 	return resp, nil
 }

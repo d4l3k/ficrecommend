@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"log"
 	"math/rand"
 	"net/http"
@@ -8,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
+	"github.com/valyala/fasthttp"
 )
 
 func init() {
@@ -17,16 +19,15 @@ func init() {
 
 var ffnetRegex = regexp.MustCompile(`^https?:\/\/.*fanfiction\.net\/s\/(\d+).*$`)
 
-func recommendFFnet(s *server, url string, limit, offset int) (*recResp, error) {
+func recommendFFnet(s *server, url string, limit, offset int) (recResp, error) {
 	if matches := ffnetRegex.FindStringSubmatch(url); len(matches) == 2 {
-		st := &Story{
+		st := Story{
 			Id:   atoi(matches[1]),
 			Site: Site_FFNET,
 		}
 		return recommendationStory(s, st, limit, offset)
-
 	}
-	return nil, errStoryNotFound
+	return recResp{}, errStoryNotFound
 }
 
 func scrapeFFnet(s *server) {
@@ -41,23 +42,23 @@ func scrapeFFnet(s *server) {
 	}
 	docs := make(chan job)
 
-	// 10 goroutines to fetch documents
-	for j := 0; j < 10; j++ {
+	// Launch goroutines to fetch documents
+	client := &fasthttp.Client{}
+	for j := 0; j < 100; j++ {
 		go func() {
+			var buf []byte
 			for u := range jobs {
-				client := &http.Client{}
-				req, err := http.NewRequest("GET", "https://www.fanfiction.net/u/"+u.Id, nil)
+				url := "https://www.fanfiction.net/u/" + u.Id
+				statusCode, body, err := client.Get(buf, url)
 				if err != nil {
 					log.Println(err)
 					continue
 				}
-				req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/42.0.2311.90 Safari/537.36")
-				resp, err := client.Do(req)
-				if err != nil {
-					log.Println(err)
+				if statusCode != http.StatusOK {
+					log.Printf("fetch %q status code = %d", url, statusCode)
 					continue
 				}
-				doc, err := goquery.NewDocumentFromResponse(resp)
+				doc, err := goquery.NewDocumentFromReader(bytes.NewReader(body))
 				if err != nil {
 					log.Println(err)
 					continue
@@ -103,25 +104,25 @@ func (u *User) fetch(doc *goquery.Document, sr *server) error {
 	u.Exists = true
 	u.Name = strings.TrimSpace(doc.Find("#content_wrapper_inner span").First().Text())
 	var err error
+	st := Story{
+		Site:   Site_FFNET,
+		Exists: true,
+	}
 	for _, typ := range []string{".favstories", ".mystories"} {
 		doc.Find(typ).Each(func(i int, s *goquery.Selection) {
 			html, _ := s.Find("div").First().Html()
-			st := &Story{
-				Id:         atoi(s.AttrOr("data-storyid", "")),
-				Site:       Site_FFNET,
-				Category:   s.AttrOr("data-category", ""),
-				Title:      s.AttrOr("data-title", ""),
-				WordCount:  atoi(s.AttrOr("data-wordcount", "")),
-				DateSubmit: atoi(s.AttrOr("data-datesubmit", "")),
-				DateUpdate: atoi(s.AttrOr("data-dateupdate", "")),
-				Reviews:    atoi(s.AttrOr("data-ratingtimes", "")),
-				Chapters:   atoi(s.AttrOr("data-chapters", "")),
-				Complete:   s.AttrOr("data-statusid", "") == "2",
-				Image:      s.Find("img").AttrOr("data-original", ""),
-				Desc:       html,
-			}
-			st.FavedBy = append(st.FavedBy, string(u.key()))
-			if !st.checkExists(sr.graph) {
+			st.Id = atoi(s.AttrOr("data-storyid", ""))
+			st.Category = s.AttrOr("data-category", "")
+			st.Title = s.AttrOr("data-title", "")
+			st.WordCount = atoi(s.AttrOr("data-wordcount", ""))
+			st.DateSubmit = atoi(s.AttrOr("data-datesubmit", ""))
+			st.DateUpdate = atoi(s.AttrOr("data-dateupdate", ""))
+			st.Reviews = atoi(s.AttrOr("data-ratingtimes", ""))
+			st.Chapters = atoi(s.AttrOr("data-chapters", ""))
+			st.Complete = s.AttrOr("data-statusid", "") == "2"
+			st.Image = s.Find("img").AttrOr("data-original", "")
+			st.Desc = html
+			if !st.checkExistsTitle(sr.graph) {
 				err = st.save(sr)
 				if err != nil {
 					return

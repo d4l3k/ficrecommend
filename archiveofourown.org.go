@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"log"
 	"net/http"
@@ -8,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
+	"github.com/valyala/fasthttp"
 )
 
 func init() {
@@ -17,15 +19,15 @@ func init() {
 
 var ao3Regex = regexp.MustCompile(`^https?:\/\/archiveofourown.org\/works\/(\d+).*$`)
 
-func recommendAO3(sr *server, url string, limit, offset int) (*recResp, error) {
+func recommendAO3(sr *server, url string, limit, offset int) (recResp, error) {
 	if matches := ao3Regex.FindStringSubmatch(url); len(matches) == 2 {
-		s := &Story{
+		s := Story{
 			Id:   atoi(matches[1]),
 			Site: Site_AO3,
 		}
 		return recommendationStory(sr, s, limit, offset)
 	}
-	return nil, errStoryNotFound
+	return recResp{}, errStoryNotFound
 }
 
 func scrapeAO3(sr *server) {
@@ -40,23 +42,23 @@ func scrapeAO3(sr *server) {
 	jobs := make(chan *Story)
 	docs := make(chan job)
 
-	// 100 goroutines to fetch documents
+	// Launch goroutines to fetch documents
+	client := &fasthttp.Client{}
 	for j := 0; j < 100; j++ {
 		go func() {
+			var buf []byte
 			for u := range jobs {
-				client := &http.Client{}
-				req, err := http.NewRequest("GET", "https://archiveofourown.org/works/"+itoa(u.Id), nil)
+				url := "http://archiveofourown.org/works/" + itoa(u.Id)
+				statusCode, body, err := client.Get(buf, url)
 				if err != nil {
 					log.Println(err)
 					continue
 				}
-				req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/42.0.2311.90 Safari/537.36")
-				resp, err := client.Do(req)
-				if err != nil {
-					log.Println(err)
+				if statusCode != http.StatusOK {
+					log.Printf("fetch %q status code = %d", url, statusCode)
 					continue
 				}
-				doc, err := goquery.NewDocumentFromResponse(resp)
+				doc, err := goquery.NewDocumentFromReader(bytes.NewReader(body))
 				if err != nil {
 					log.Println(err)
 					continue
@@ -122,6 +124,10 @@ func fetchAO3(s *Story, doc *goquery.Document, sr *server) error {
 	s.Desc += "<div class='xgray'>" + fandoms + " - " + stats + "</div>"
 
 	var err error
+	u := User{
+		Site:   Site_AO3,
+		Exists: true,
+	}
 	doc.Find("#kudos a").Each(func(i int, sel *goquery.Selection) {
 		link := sel.AttrOr("href", "")
 		if !strings.HasPrefix(link, "/users/") {
@@ -129,15 +135,10 @@ func fetchAO3(s *Story, doc *goquery.Document, sr *server) error {
 		}
 
 		name := strings.ToLower(sel.Text())
-
-		u := &User{
-			Id:   name,
-			Name: name,
-			Site: Site_AO3,
-		}
-		u.Exists = true
-		s.FavedBy = append(s.FavedBy, u.key())
-		u.FavStories = append(u.FavStories, s.key())
+		u.Id = name
+		u.Name = name
+		s.FavedBy = []string{u.key()}
+		u.FavStories = []string{s.key()}
 		if !u.checkExists(sr.graph) {
 			err = u.save(sr)
 			if err != nil {

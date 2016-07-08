@@ -21,6 +21,9 @@ import (
 	_ "github.com/cayleygraph/cayley/graph/leveldb"
 )
 
+// FakeUserAgent is the user agent to use when making requests.
+const FakeUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/51.0.2704.103 Safari/537.36"
+
 func (s *Story) annotate() {
 	switch s.Site {
 	case Site_FFNET:
@@ -45,9 +48,6 @@ func (s *server) cmdGet(bucket, key string) {
 	switch bucket {
 	case "stories":
 		v = storyByKey(s.graph, key)
-	case "users":
-		v = userByKey(key)
-	default:
 	}
 	fmt.Printf("key=%s, value=%+v\n", key, v)
 }
@@ -80,24 +80,24 @@ func fetchStories(s *cayley.Handle, keys []string) []*Story {
 	stories := make([]*Story, len(keys))
 	for i, key := range keys {
 		st := storyByKey(s, key)
-		stories[i] = st
+		stories[i] = &st
 	}
 	return stories
 }
 
-var recommenders []func(s *server, url string, limit, offset int) (*recResp, error)
+var recommenders []func(s *server, url string, limit, offset int) (recResp, error)
 
-func (s *server) recommendations(url string, limit, offset int) (*recResp, error) {
+func (s *server) recommendations(url string, limit, offset int) (recResp, error) {
 	for _, rec := range recommenders {
 		resp, err := rec(s, url, limit, offset)
 		if err == errStoryNotFound {
 			continue
 		} else if err != nil {
-			return nil, err
+			return recResp{}, err
 		}
 		return resp, nil
 	}
-	return nil, errStoryNotFound
+	return recResp{}, errStoryNotFound
 }
 
 var scrapers []func(s *server)
@@ -177,6 +177,7 @@ func (s *server) handleRecommendation(w http.ResponseWriter, r *http.Request) {
 var (
 	scrape = flag.Bool("scrape", true, "whether to scrape sites")
 	port   = flag.String("port", "6060", "port to run on")
+	path   = flag.String("path", "./recommender.leveldb", "database directory")
 )
 
 type server struct {
@@ -186,9 +187,9 @@ type server struct {
 func newServer() (*server, error) {
 	s := &server{}
 
-	path := "./recommender.leveldb"
+	*graph.IgnoreDup = true
 
-	err := graph.InitQuadStore("leveldb", path, map[string]interface{}{
+	err := graph.InitQuadStore("leveldb", *path, map[string]interface{}{
 		"ignore_duplicate": true,
 	})
 	if err == graph.ErrDatabaseExists {
@@ -196,7 +197,7 @@ func newServer() (*server, error) {
 	} else if err != nil {
 		return nil, err
 	}
-	s.graph, err = cayley.NewGraph("leveldb", path, nil)
+	s.graph, err = cayley.NewGraph("leveldb", *path, nil)
 	if err != nil {
 		return nil, err
 	}
