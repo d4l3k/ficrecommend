@@ -106,11 +106,9 @@ func storyByKey(g *cayley.Handle, key string) Story {
 	s := Story{}
 	it, _ := cayley.StartPath(g, key).Save(StoryID, StoryID).Save(StoryTitle, StoryTitle).Save(StoryDescription, StoryDescription).Save(StoryURL, StoryURL).Save(SiteID, SiteID).BuildIterator().Optimize()
 	defer it.Close()
-	log.Printf("storyByKey it")
 	for cayley.RawNext(it) {
 		results := map[string]graph.Value{}
 		it.TagResults(results)
-		log.Printf("storyByKey %q %+v", key, results)
 		s.Id = atoi(g.NameOf(results[StoryID]))
 		s.Title = g.NameOf(results[StoryTitle])
 		s.Desc = g.NameOf(results[StoryDescription])
@@ -151,6 +149,18 @@ func (s Story) save(sr *server) error {
 	return sr.graph.ApplyTransaction(txn)
 }
 
+type recResp struct {
+	Stories []*Story
+	Authors []*User
+	Story   *Story
+	Stats   respStats
+}
+
+type respStats struct {
+	StoryCount int
+	Favorites  int
+}
+
 func recommendationStory(sr *server, s Story, limit, offset int) (recResp, error) {
 	var sOut []*Story
 	var uOut []*User
@@ -169,10 +179,16 @@ func recommendationStory(sr *server, s Story, limit, offset int) (recResp, error
 		recStories[stID]++
 	}
 
+	favorites := 0
+	for _, count := range recStories {
+		favorites += count
+	}
+
 	rsl := sortMap(recStories, limit+offset)
 	if len(rsl) > 1 && rsl[0] == s.key() {
 		rsl = rsl[1:]
 	}
+	storyCount := len(rsl)
 	if len(rsl) > (limit + offset) {
 		rsl = rsl[offset : offset+limit]
 	} else if len(rsl) > offset {
@@ -193,6 +209,10 @@ func recommendationStory(sr *server, s Story, limit, offset int) (recResp, error
 		sOut,
 		uOut,
 		&s,
+		respStats{
+			storyCount,
+			favorites,
+		},
 	}
 	return resp, nil
 }

@@ -122,12 +122,6 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, "static/index.html")
 }
 
-type recResp struct {
-	Stories []*Story
-	Authors []*User
-	Story   *Story
-}
-
 func requestFormInt(r *http.Request, field string, def int) int {
 	val := r.FormValue(field)
 	if len(val) == 0 {
@@ -227,23 +221,6 @@ func main() {
 		log.Fatal(err)
 	}
 	defer s.graph.Close()
-
-	args := os.Args[1:]
-	switch len(args) {
-	case 2:
-		switch args[0] {
-		case "list":
-		case "recommend":
-			cmdRecommend(s, args[1])
-		case "count":
-		}
-		return
-	case 3:
-		if args[0] == "get" {
-			s.cmdGet(args[1], args[2])
-			return
-		}
-	}
 
 	fs := http.FileServer(http.Dir("."))
 	http.Handle("/static/", fs)
