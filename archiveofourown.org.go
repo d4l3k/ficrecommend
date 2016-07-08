@@ -2,14 +2,12 @@ package main
 
 import (
 	"errors"
-	"fmt"
 	"log"
 	"net/http"
 	"regexp"
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
-	"github.com/boltdb/bolt"
 )
 
 func init() {
@@ -19,28 +17,19 @@ func init() {
 
 var ao3Regex = regexp.MustCompile(`^https?:\/\/archiveofourown.org\/works\/(\d+).*$`)
 
-func recommendAO3(db *bolt.DB, url string, limit, offset int) (*recResp, error) {
+func recommendAO3(sr *server, url string, limit, offset int) (*recResp, error) {
 	if matches := ao3Regex.FindStringSubmatch(url); len(matches) == 2 {
 		s := &Story{
 			Id:   atoi(matches[1]),
 			Site: Site_AO3,
 		}
-		return recommendationStory(db, s, limit, offset)
+		return recommendationStory(sr, s, limit, offset)
 	}
 	return nil, errStoryNotFound
 }
 
-func scrapeAO3(db *bolt.DB) {
+func scrapeAO3(sr *server) {
 	log.Println("Scraping archiveofourown.org...")
-	db.Update(func(tx *bolt.Tx) error {
-		for _, bucket := range []string{"stories", "users"} {
-			_, err := tx.CreateBucketIfNotExists([]byte(bucket))
-			if err != nil {
-				return fmt.Errorf("create bucket: %s", err)
-			}
-		}
-		return nil
-	})
 	fetched := 1
 	total := 4200000
 
@@ -92,7 +81,7 @@ func scrapeAO3(db *bolt.DB) {
 			}
 			i++
 			fetched++
-			if u.update(db) {
+			if u.checkExists(sr.graph) {
 				continue
 			}
 			//time.Sleep(time.Second / 2)
@@ -103,7 +92,7 @@ func scrapeAO3(db *bolt.DB) {
 	// Handle fetched documents
 	for doc := range docs {
 		s := doc.s
-		err := fetchAO3(s, doc.doc, db)
+		err := fetchAO3(s, doc.doc, sr)
 		if err != nil {
 			if !strings.HasPrefix(err.Error(), "story doesn't exist") {
 				log.Println(err)
@@ -117,18 +106,22 @@ func scrapeAO3(db *bolt.DB) {
 	}
 }
 
-func fetchAO3(s *Story, doc *goquery.Document, db *bolt.DB) error {
+func fetchAO3(s *Story, doc *goquery.Document, sr *server) error {
 	if doc.Find("h2.title.heading").Length() == 0 {
 		s.Exists = false
-		s.save(db)
+		if err := s.save(sr); err != nil {
+			return err
+		}
 		return errors.New("story doesn't exist " + itoa(s.Id))
 	}
+	s.Exists = true
 	s.Title = strings.TrimSpace(doc.Find("h2.title.heading").First().Text())
 	s.Desc = doc.Find(".summary p").Text()
 	stats, _ := doc.Find("dd.stats dl.stats").Html()
 	fandoms, _ := doc.Find(".fandom li").Html()
 	s.Desc += "<div class='xgray'>" + fandoms + " - " + stats + "</div>"
 
+	var err error
 	doc.Find("#kudos a").Each(func(i int, sel *goquery.Selection) {
 		link := sel.AttrOr("href", "")
 		if !strings.HasPrefix(link, "/users/") {
@@ -142,10 +135,18 @@ func fetchAO3(s *Story, doc *goquery.Document, db *bolt.DB) error {
 			Name: name,
 			Site: Site_AO3,
 		}
-		u.update(db)
-		s.FavedBy = append(s.FavedBy, string(u.key()))
-		u.FavStories = append(u.FavStories, string(s.key()))
-		u.save(db)
+		u.Exists = true
+		s.FavedBy = append(s.FavedBy, u.key())
+		u.FavStories = append(u.FavStories, s.key())
+		if !u.checkExists(sr.graph) {
+			err = u.save(sr)
+			if err != nil {
+				return
+			}
+		}
 	})
-	return s.save(db)
+	if err != nil {
+		return err
+	}
+	return s.save(sr)
 }

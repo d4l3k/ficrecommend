@@ -14,7 +14,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/boltdb/bolt"
+	_ "net/http/pprof"
+
+	"github.com/cayleygraph/cayley"
+	"github.com/cayleygraph/cayley/graph"
+	_ "github.com/cayleygraph/cayley/graph/leveldb"
 )
 
 func (s *Story) annotate() {
@@ -36,45 +40,16 @@ func itoa(i int32) string {
 	return strconv.Itoa(int(i))
 }
 
-func cmdList(db *bolt.DB, bucket string) {
-	db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(bucket))
-		b.ForEach(func(k, v []byte) error {
-			fmt.Printf("key=%s, value=%s\n", k, v)
-			return nil
-		})
-		return nil
-	})
-}
-
-func cmdCount(db *bolt.DB, bucket string) {
-	log.Println("Counting", bucket)
-	db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(bucket))
-		log.Println("Entries:", b.Stats().KeyN)
-		return nil
-	})
-}
-
-func cmdGet(db *bolt.DB, bucket, key string) {
-	db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(bucket))
-		var v interface{}
-		switch bucket {
-		case "stories":
-			s := storyByKey(key)
-			s.update(db)
-			v = s
-		case "users":
-			u := userByKey(key)
-			u.update(db)
-			v = u
-		default:
-			v = b.Get([]byte(key))
-		}
-		fmt.Printf("key=%s, value=%+v\n", key, v)
-		return nil
-	})
+func (s *server) cmdGet(bucket, key string) {
+	var v interface{}
+	switch bucket {
+	case "stories":
+		v = storyByKey(s.graph, key)
+	case "users":
+		v = userByKey(key)
+	default:
+	}
+	fmt.Printf("key=%s, value=%+v\n", key, v)
 }
 
 type storySlice struct {
@@ -101,31 +76,20 @@ func sortMap(m map[string]int, limit int) []string {
 	return ss.arr
 }
 
-func fetchStories(b *bolt.Bucket, keys []string) []*Story {
+func fetchStories(s *cayley.Handle, keys []string) []*Story {
 	stories := make([]*Story, len(keys))
 	for i, key := range keys {
-		st := storyByKey(key)
-		st.updateBucket(b)
+		st := storyByKey(s, key)
 		stories[i] = st
 	}
 	return stories
 }
 
-func fetchUsers(b *bolt.Bucket, keys []string) []*User {
-	users := make([]*User, len(keys))
-	for i, key := range keys {
-		st := userByKey(key)
-		st.updateBucket(b)
-		users[i] = st
-	}
-	return users
-}
+var recommenders []func(s *server, url string, limit, offset int) (*recResp, error)
 
-var recommenders []func(db *bolt.DB, url string, limit, offset int) (*recResp, error)
-
-func recommendations(db *bolt.DB, url string, limit, offset int) (*recResp, error) {
+func (s *server) recommendations(url string, limit, offset int) (*recResp, error) {
 	for _, rec := range recommenders {
-		resp, err := rec(db, url, limit, offset)
+		resp, err := rec(s, url, limit, offset)
 		if err == errStoryNotFound {
 			continue
 		} else if err != nil {
@@ -136,16 +100,10 @@ func recommendations(db *bolt.DB, url string, limit, offset int) (*recResp, erro
 	return nil, errStoryNotFound
 }
 
-var scrapers []func(db *bolt.DB)
+var scrapers []func(s *server)
 
-func cmdScrape(db *bolt.DB) {
-	for _, scraper := range scrapers {
-		go scraper(db)
-	}
-}
-
-func cmdRecommend(db *bolt.DB, id string) {
-	recs, err := recommendations(db, id, 20, 0)
+func cmdRecommend(s *server, id string) {
+	recs, err := s.recommendations(id, 20, 0)
 	if err != nil {
 		log.Print(err)
 		return
@@ -163,8 +121,6 @@ func cmdRecommend(db *bolt.DB, id string) {
 func handleIndex(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, "static/index.html")
 }
-
-var bdb *bolt.DB
 
 type recResp struct {
 	Stories []*Story
@@ -184,7 +140,7 @@ func requestFormInt(r *http.Request, field string, def int) int {
 	return num
 }
 
-func handleRecommendation(w http.ResponseWriter, r *http.Request) {
+func (s *server) handleRecommendation(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
 	id := r.FormValue("id")
@@ -198,7 +154,7 @@ func handleRecommendation(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "offset must be  >= 0", 400)
 		return
 	}
-	resp, err := recommendations(bdb, id, limit, offset)
+	resp, err := s.recommendations(id, limit, offset)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
@@ -223,46 +179,76 @@ var (
 	port   = flag.String("port", "6060", "port to run on")
 )
 
+type server struct {
+	graph *cayley.Handle
+}
+
+func newServer() (*server, error) {
+	s := &server{}
+
+	path := "./recommender.leveldb"
+
+	err := graph.InitQuadStore("leveldb", path, map[string]interface{}{
+		"ignore_duplicate": true,
+	})
+	if err == graph.ErrDatabaseExists {
+		log.Print(err)
+	} else if err != nil {
+		return nil, err
+	}
+	s.graph, err = cayley.NewGraph("leveldb", path, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if *scrape {
+		s.startScraping()
+	}
+
+	return s, nil
+}
+
+func (s *server) startScraping() {
+	log.Print("starting scraping...")
+	for _, scraper := range scrapers {
+		go scraper(s)
+	}
+}
+
 // Setup registers all server handlers.
 func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
+	log.SetFlags(log.Flags() | log.Lshortfile)
 	flag.Parse()
 
-	db, err := bolt.Open("recommender.db", 0600, nil)
+	s, err := newServer()
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer db.Close()
-	bdb = db
+	defer s.graph.Close()
 
 	args := os.Args[1:]
 	switch len(args) {
 	case 2:
 		switch args[0] {
 		case "list":
-			cmdList(db, args[1])
 		case "recommend":
-			cmdRecommend(db, args[1])
+			cmdRecommend(s, args[1])
 		case "count":
-			cmdCount(db, args[1])
 		}
 		return
 	case 3:
 		if args[0] == "get" {
-			cmdGet(db, args[1], args[2])
+			s.cmdGet(args[1], args[2])
 			return
 		}
-	}
-
-	if *scrape {
-		go cmdScrape(db)
 	}
 
 	fs := http.FileServer(http.Dir("."))
 	http.Handle("/static/", fs)
 
 	http.HandleFunc("/", handleIndex)
-	http.HandleFunc("/api/v1/recommendation", handleRecommendation)
+	http.HandleFunc("/api/v1/recommendation", s.handleRecommendation)
 
 	log.Printf("Serving on :%s...", *port)
 
