@@ -2,9 +2,11 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"log"
 	"regexp"
 	"strconv"
+	"time"
 
 	"github.com/cayleygraph/cayley"
 	"github.com/cayleygraph/cayley/graph"
@@ -195,25 +197,45 @@ type respStats struct {
 }
 
 func recommendationStory(sr *server, keys []string, limit, offset int) (recResp, error) {
+	start := time.Now()
 	g := sr.graph
 	s := storyByKey(g, keys[0])
 	log.Printf("Finding recommendations for \"%s\"...", s.Title)
 	recStories := make(map[string]float64)
 
-	paths := []*path.Path{
-		path.StartMorphism(keys...).Out(StoryFavoritedBy).Out(UserFavoriteStory),
-		path.StartMorphism(keys...).Out(StoryFavoritedBy).Out(UserStory),
-		path.StartMorphism(keys...).Out(StoryAuthor).Out(UserFavoriteStory),
-		path.StartMorphism(keys...).Out(StoryAuthor).Out(UserStory),
+	paths := []struct {
+		desc string
+		path *path.Path
+	}{
+		{
+			fmt.Sprintf("%q -> %q", StoryFavoritedBy, UserFavoriteStory),
+			path.StartMorphism(keys...).Out(StoryFavoritedBy).Out(StoryFavoritedBy),
+		},
+		{
+			fmt.Sprintf("%q -> %q", StoryFavoritedBy, UserStory),
+			path.StartMorphism(keys...).Out(StoryFavoritedBy).Out(UserStory),
+		},
+		{
+			fmt.Sprintf("%q -> %q", StoryAuthor, UserFavoriteStory),
+			path.StartMorphism(keys...).Out(StoryAuthor).Out(UserFavoriteStory),
+		},
+		{
+			fmt.Sprintf("%q -> %q", StoryAuthor, UserStory),
+			path.StartMorphism(keys...).Out(StoryAuthor).Out(UserStory),
+		},
 	}
 	for _, path := range paths {
-		it, _ := path.BuildIteratorOn(g).Optimize()
+		startOpt := time.Now()
+		it, _ := path.path.BuildIteratorOn(g).Optimize()
 		defer it.Close()
+		log.Printf("%s: BuildIterator().Optimize() took %s", path.desc, time.Now().Sub(startOpt))
 
+		startFetch := time.Now()
 		for cayley.RawNext(it) {
 			stID := g.NameOf(it.Result())
 			recStories[stID]++
 		}
+		log.Printf("%s: cayley.RawNext(it) took %s", path.desc, time.Now().Sub(startFetch))
 	}
 
 	// Remove favorites pointing to original story.
@@ -260,7 +282,9 @@ func recommendationStory(sr *server, keys []string, limit, offset int) (recResp,
 	} else {
 		rsl = nil
 	}
+	startStories := time.Now()
 	sOut := storiesByKeys(g, rsl)
+	log.Printf("storiesByKeys(len = %d) took %s", len(rsl), time.Now().Sub(startStories))
 	for i, st := range sOut {
 		st.annotate()
 		st.Score = float32(recStories[rsl[i]])
@@ -275,5 +299,7 @@ func recommendationStory(sr *server, keys []string, limit, offset int) (recResp,
 			favorites,
 		},
 	}
+
+	log.Printf("recommendationStory(%q) took %s, stats %+v", s.Title, time.Now().Sub(start), resp.Stats)
 	return resp, nil
 }

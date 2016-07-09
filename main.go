@@ -167,16 +167,10 @@ var (
 	dbpath = flag.String("dbpath", "./recommender.leveldb", "database directory")
 )
 
-type server struct {
-	graph *cayley.Handle
-}
-
-func newServer() (*server, error) {
-	s := &server{}
-
+func loadGraph(path string) (*cayley.Handle, error) {
 	*graph.IgnoreDup = true
 
-	err := graph.InitQuadStore("leveldb", *dbpath, map[string]interface{}{
+	err := graph.InitQuadStore("leveldb", path, map[string]interface{}{
 		"ignore_duplicate": true,
 	})
 	if err == graph.ErrDatabaseExists {
@@ -184,10 +178,21 @@ func newServer() (*server, error) {
 	} else if err != nil {
 		return nil, err
 	}
-	s.graph, err = cayley.NewGraph("leveldb", *dbpath, nil)
+	return cayley.NewGraph("leveldb", path, nil)
+}
+
+type server struct {
+	graph *cayley.Handle
+}
+
+func newServer() (*server, error) {
+	s := &server{}
+
+	g, err := loadGraph(*dbpath)
 	if err != nil {
 		return nil, err
 	}
+	s.graph = g
 
 	if *scrape {
 		s.startScraping()
