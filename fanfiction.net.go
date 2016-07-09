@@ -92,7 +92,7 @@ func scrapeFFGroup(s *server, domain string, site Site, total int) {
 	// Handle fetched documents
 	for doc := range docs {
 		u := doc.u
-		err := u.fetch(doc.doc, s)
+		err := u.fetch(doc.doc, s, site)
 		if err != nil {
 			log.Println(err)
 		}
@@ -105,7 +105,7 @@ func scrapeFFGroup(s *server, domain string, site Site, total int) {
 
 var ffFavCountRegex = regexp.MustCompile(`Favs: ([0-9,]+) -`)
 
-func (u *User) fetch(doc *goquery.Document, sr *server) error {
+func (u *User) fetch(doc *goquery.Document, sr *server, site Site) error {
 	if doc.Find("#bio_text").Length() != 1 {
 		return u.save(sr)
 	}
@@ -113,7 +113,7 @@ func (u *User) fetch(doc *goquery.Document, sr *server) error {
 	u.Name = strings.TrimSpace(doc.Find("#content_wrapper_inner span").First().Text())
 	var err error
 	st := Story{
-		Site:   Site_FFNET,
+		Site:   site,
 		Exists: true,
 	}
 	for _, typ := range []string{".favstories", ".mystories"} {
