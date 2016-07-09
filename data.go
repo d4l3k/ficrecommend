@@ -8,6 +8,7 @@ import (
 
 	"github.com/cayleygraph/cayley"
 	"github.com/cayleygraph/cayley/graph"
+	"github.com/cayleygraph/cayley/graph/path"
 	"github.com/cayleygraph/cayley/quad"
 )
 
@@ -193,16 +194,25 @@ type respStats struct {
 }
 
 func recommendationStory(sr *server, keys []string, limit, offset int) (recResp, error) {
-	s := storyByKey(sr.graph, keys[0])
+	g := sr.graph
+	s := storyByKey(g, keys[0])
 	log.Printf("Finding recommendations for \"%s\"...", s.Title)
 	recStories := make(map[string]float64)
 
-	it, _ := cayley.StartPath(sr.graph, keys...).Out(StoryFavoritedBy).In(StoryFavoritedBy).BuildIterator().Optimize()
-	defer it.Close()
+	paths := []*path.Path{
+		path.StartMorphism(keys...).Out(StoryFavoritedBy).Out(UserFavoriteStory),
+		path.StartMorphism(keys...).Out(StoryFavoritedBy).Out(UserStory),
+		path.StartMorphism(keys...).Out(StoryAuthor).Out(UserFavoriteStory),
+		path.StartMorphism(keys...).Out(StoryAuthor).Out(UserStory),
+	}
+	for _, path := range paths {
+		it, _ := path.BuildIteratorOn(g).Optimize()
+		defer it.Close()
 
-	for cayley.RawNext(it) {
-		stID := sr.graph.NameOf(it.Result())
-		recStories[stID]++
+		for cayley.RawNext(it) {
+			stID := g.NameOf(it.Result())
+			recStories[stID]++
+		}
 	}
 
 	// Remove favorites pointing to original story.
@@ -222,13 +232,13 @@ func recommendationStory(sr *server, keys []string, limit, offset int) (recResp,
 
 	/*
 		// Weight stories by sum of shared favorites * log(# favorites) / # favorites
-		it2, _ := cayley.StartPath(sr.graph, stories...).Save(StoryFavorites, StoryFavorites).BuildIterator().Optimize()
+		it2, _ := cayley.StartPath(g, stories...).Save(StoryFavorites, StoryFavorites).BuildIterator().Optimize()
 		defer it2.Close()
 		for i := 0; cayley.RawNext(it2); i++ {
 			story := stories[i]
 			results := map[string]graph.Value{}
 			it2.TagResults(results)
-			favorites := float64(atoi(sr.graph.NameOf(results[StoryFavorites])))
+			favorites := float64(atoi(g.NameOf(results[StoryFavorites])))
 			if favorites == 0 {
 				continue
 			}
@@ -249,7 +259,7 @@ func recommendationStory(sr *server, keys []string, limit, offset int) (recResp,
 	} else {
 		rsl = nil
 	}
-	sOut := storiesByKeys(sr.graph, rsl)
+	sOut := storiesByKeys(g, rsl)
 	for i, st := range sOut {
 		st.annotate()
 		st.Score = float32(recStories[rsl[i]])

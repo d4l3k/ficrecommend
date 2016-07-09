@@ -161,7 +161,7 @@ func (s *server) handleRecommendation(w http.ResponseWriter, r *http.Request) {
 var (
 	scrape = flag.Bool("scrape", true, "whether to scrape sites")
 	port   = flag.String("port", "6060", "port to run on")
-	path   = flag.String("path", "./recommender.leveldb", "database directory")
+	dbpath = flag.String("dbpath", "./recommender.leveldb", "database directory")
 )
 
 type server struct {
@@ -173,7 +173,7 @@ func newServer() (*server, error) {
 
 	*graph.IgnoreDup = true
 
-	err := graph.InitQuadStore("leveldb", *path, map[string]interface{}{
+	err := graph.InitQuadStore("leveldb", *dbpath, map[string]interface{}{
 		"ignore_duplicate": true,
 	})
 	if err == graph.ErrDatabaseExists {
@@ -181,7 +181,7 @@ func newServer() (*server, error) {
 	} else if err != nil {
 		return nil, err
 	}
-	s.graph, err = cayley.NewGraph("leveldb", *path, nil)
+	s.graph, err = cayley.NewGraph("leveldb", *dbpath, nil)
 	if err != nil {
 		return nil, err
 	}
