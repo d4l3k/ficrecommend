@@ -76,15 +76,6 @@ func sortMap(m map[string]int, limit int) []string {
 	return ss.arr
 }
 
-func fetchStories(s *cayley.Handle, keys []string) []*Story {
-	stories := make([]*Story, len(keys))
-	for i, key := range keys {
-		st := storyByKey(s, key)
-		stories[i] = &st
-	}
-	return stories
-}
-
 var recommenders []func(s *server, url string, limit, offset int) (recResp, error)
 
 func (s *server) recommendations(url string, limit, offset int) (recResp, error) {

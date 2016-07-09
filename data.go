@@ -104,19 +104,24 @@ func (u User) save(s *server) error {
 }
 
 func storyByKey(g *cayley.Handle, key string) Story {
-	s := Story{}
-	it, _ := cayley.StartPath(g, key).Save(StoryID, StoryID).Save(StoryTitle, StoryTitle).Save(StoryDescription, StoryDescription).Save(StoryURL, StoryURL).Save(SiteID, SiteID).BuildIterator().Optimize()
+	return *storiesByKeys(g, []string{key})[0]
+}
+
+func storiesByKeys(g *cayley.Handle, keys []string) []*Story {
+	stories := make([]*Story, 0, len(keys))
+	it, _ := cayley.StartPath(g, keys...).Save(StoryID, StoryID).Save(StoryTitle, StoryTitle).Save(StoryDescription, StoryDescription).Save(SiteID, SiteID).BuildIterator().Optimize()
 	defer it.Close()
 	for cayley.RawNext(it) {
+		s := Story{}
 		results := map[string]graph.Value{}
 		it.TagResults(results)
 		s.Id = atoi(g.NameOf(results[StoryID]))
 		s.Title = g.NameOf(results[StoryTitle])
 		s.Desc = g.NameOf(results[StoryDescription])
-		s.Url = g.NameOf(results[StoryURL])
 		s.Site = Site(Site_value[g.NameOf(results[SiteID])])
+		stories = append(stories, &s)
 	}
-	return s
+	return stories
 }
 
 func (s Story) key() string {
@@ -164,8 +169,6 @@ type respStats struct {
 }
 
 func recommendationStory(sr *server, s Story, limit, offset int) (recResp, error) {
-	var sOut []*Story
-	var uOut []*User
 	if !s.checkExists(sr.graph) {
 		return recResp{}, errStoryNotFound
 	}
@@ -198,18 +201,14 @@ func recommendationStory(sr *server, s Story, limit, offset int) (recResp, error
 	} else {
 		rsl = nil
 	}
-	sOut = fetchStories(sr.graph, rsl)
+	sOut := storiesByKeys(sr.graph, rsl)
 	for _, st := range sOut {
-		st.FavedBy = nil
 		st.annotate()
-	}
-	for _, st := range uOut {
-		st.FavedBy = nil
 	}
 	s.annotate()
 	resp := recResp{
 		sOut,
-		uOut,
+		nil,
 		&s,
 		respStats{
 			storyCount,
