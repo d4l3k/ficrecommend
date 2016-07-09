@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	"fmt"
 	"log"
 	"regexp"
 	"strconv"
@@ -194,6 +193,7 @@ type recResp struct {
 type respStats struct {
 	StoryCount int
 	Favorites  int
+	Users      int
 }
 
 func recommendationStory(sr *server, keys []string, limit, offset int) (recResp, error) {
@@ -203,27 +203,21 @@ func recommendationStory(sr *server, keys []string, limit, offset int) (recResp,
 	log.Printf("Finding recommendations for \"%s\"...", s.Title)
 	recStories := make(map[string]float64)
 
+	// Fetch users first.
 	paths := []struct {
 		desc string
 		path *path.Path
 	}{
 		{
-			fmt.Sprintf("%q -> %q", StoryFavoritedBy, UserFavoriteStory),
-			path.StartMorphism(keys...).Out(StoryFavoritedBy).Out(UserFavoriteStory),
+			StoryFavoritedBy,
+			path.StartMorphism(keys...).Out(StoryFavoritedBy),
 		},
 		{
-			fmt.Sprintf("%q -> %q", StoryFavoritedBy, UserStory),
-			path.StartMorphism(keys...).Out(StoryFavoritedBy).Out(UserStory),
-		},
-		{
-			fmt.Sprintf("%q -> %q", StoryAuthor, UserFavoriteStory),
-			path.StartMorphism(keys...).Out(StoryAuthor).Out(UserFavoriteStory),
-		},
-		{
-			fmt.Sprintf("%q -> %q", StoryAuthor, UserStory),
-			path.StartMorphism(keys...).Out(StoryAuthor).Out(UserStory),
+			StoryAuthor,
+			path.StartMorphism(keys...).Out(StoryAuthor),
 		},
 	}
+	var users []string
 	for _, path := range paths {
 		startOpt := time.Now()
 		it, _ := path.path.BuildIteratorOn(g).Optimize()
@@ -231,7 +225,36 @@ func recommendationStory(sr *server, keys []string, limit, offset int) (recResp,
 		log.Printf("%s: BuildIterator().Optimize() took %s", path.desc, time.Now().Sub(startOpt))
 
 		startFetch := time.Now()
-		for cayley.RawNext(it) {
+		nexter := it.(graph.Nexter)
+		for nexter.Next() {
+			users = append(users, g.NameOf(it.Result()))
+		}
+		log.Printf("%s: cayley.RawNext(it) took %s", path.desc, time.Now().Sub(startFetch))
+	}
+
+	// Fetch users' stories and favorites.
+	paths2 := []struct {
+		desc string
+		path *path.Path
+	}{
+		{
+			UserFavoriteStory,
+			path.StartMorphism(users...).Out(UserFavoriteStory),
+		},
+		{
+			UserStory,
+			path.StartMorphism(users...).Out(UserStory),
+		},
+	}
+	for _, path := range paths2 {
+		startOpt := time.Now()
+		it, _ := path.path.BuildIteratorOn(g).Optimize()
+		defer it.Close()
+		log.Printf("%s: BuildIterator().Optimize() took %s", path.desc, time.Now().Sub(startOpt))
+
+		startFetch := time.Now()
+		nexter := it.(graph.Nexter)
+		for nexter.Next() {
 			stID := g.NameOf(it.Result())
 			recStories[stID]++
 		}
@@ -297,6 +320,7 @@ func recommendationStory(sr *server, keys []string, limit, offset int) (recResp,
 		respStats{
 			storyCount,
 			favorites,
+			len(users),
 		},
 	}
 
