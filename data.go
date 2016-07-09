@@ -125,6 +125,7 @@ func storiesByKeys(g *cayley.Handle, keys []string) []*Story {
 		s.Title = g.NameOf(results[StoryTitle])
 		s.Desc = g.NameOf(results[StoryDescription])
 		s.Site = Site(Site_value[g.NameOf(results[SiteID])])
+		s.annotate()
 		stories = append(stories, &s)
 	}
 	return stories
