@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"log"
 	"math/rand"
 	"net/http"
@@ -13,26 +14,31 @@ import (
 )
 
 func init() {
-	scrapers = append(scrapers, scrapeFFnet)
-	recommenders = append(recommenders, recommendFFnet)
+	scrapers = append(scrapers, scrapeFFnet, scrapeFictionPress)
+	recommenders = append(recommenders, recommendFFnet, recommendFictionPress)
 }
 
 var ffnetRegex = regexp.MustCompile(`^https?:\/\/.*fanfiction\.net\/s\/(\d+).*$`)
+var fictionPressRegex = regexp.MustCompile(`^https?:\/\/.*fictionpress\.com\/s\/(\d+).*$`)
 
-func recommendFFnet(s *server, url string, limit, offset int) (recResp, error) {
-	if matches := ffnetRegex.FindStringSubmatch(url); len(matches) == 2 {
-		st := Story{
-			Id:   atoi(matches[1]),
-			Site: Site_FFNET,
-		}
-		return recommendationStory(s, st, limit, offset)
-	}
-	return recResp{}, errStoryNotFound
+func recommendFFnet(s *server, urls []string, limit, offset int) (recResp, error) {
+	return recommendGeneric(s, urls, limit, offset, ffnetRegex)
 }
 
 func scrapeFFnet(s *server) {
-	log.Println("Scraping fanfiction.net...")
-	total := 8043930
+	scrapeFFGroup(s, "www.fanfiction.net", Site_FFNET, 8043930)
+}
+
+func recommendFictionPress(s *server, urls []string, limit, offset int) (recResp, error) {
+	return recommendGeneric(s, urls, limit, offset, fictionPressRegex)
+}
+
+func scrapeFictionPress(s *server) {
+	scrapeFFGroup(s, "www.fictionpress.com", Site_FICTIONPRESS, 1067244)
+}
+
+func scrapeFFGroup(s *server, domain string, site Site, total int) {
+	log.Printf("Scraping %s...", domain)
 	fetched := 1
 	jobs := make(chan *User)
 
@@ -48,7 +54,7 @@ func scrapeFFnet(s *server) {
 		go func() {
 			var buf []byte
 			for u := range jobs {
-				url := "https://www.fanfiction.net/u/" + u.Id
+				url := fmt.Sprintf("https://%s/u/%s", domain, u.Id)
 				statusCode, body, err := client.Get(buf, url)
 				if err != nil {
 					log.Println(err)
@@ -73,7 +79,7 @@ func scrapeFFnet(s *server) {
 		for {
 			u := &User{
 				Id:   itoa(int32(rand.Intn(total))),
-				Site: Site_FFNET,
+				Site: site,
 			}
 			if u.checkExists(s.graph) {
 				continue
@@ -92,7 +98,7 @@ func scrapeFFnet(s *server) {
 		}
 		fetched++
 		if u.Exists {
-			log.Printf("Fetched FF.net %8s %q", u.Id, u.Name)
+			log.Printf("Fetched %12s %8s %q", Site_name[int32(site)], u.Id, u.Name)
 		}
 	}
 }

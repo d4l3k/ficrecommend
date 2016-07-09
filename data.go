@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"log"
+	"regexp"
 	"strconv"
 
 	"github.com/cayleygraph/cayley"
@@ -104,7 +105,11 @@ func (u User) save(s *server) error {
 }
 
 func storyByKey(g *cayley.Handle, key string) Story {
-	return *storiesByKeys(g, []string{key})[0]
+	stories := storiesByKeys(g, []string{key})
+	if len(stories) > 0 {
+		return *stories[0]
+	}
+	return Story{}
 }
 
 func storiesByKeys(g *cayley.Handle, keys []string) []*Story {
@@ -156,6 +161,23 @@ func (s Story) save(sr *server) error {
 	return sr.graph.ApplyTransaction(txn)
 }
 
+func recommendGeneric(s *server, urls []string, limit, offset int, reg *regexp.Regexp) (recResp, error) {
+	var matches []string
+	for _, url := range urls {
+		if submatches := reg.FindStringSubmatch(url); len(submatches) == 2 {
+			st := Story{
+				Id:   atoi(submatches[1]),
+				Site: Site_FFNET,
+			}
+			matches = append(matches, st.key())
+		}
+	}
+	if len(matches) > 0 {
+		return recommendationStory(s, matches, limit, offset)
+	}
+	return recResp{}, errStoryNotFound
+}
+
 type recResp struct {
 	Stories []*Story
 	Authors []*User
@@ -168,15 +190,12 @@ type respStats struct {
 	Favorites  int
 }
 
-func recommendationStory(sr *server, s Story, limit, offset int) (recResp, error) {
-	if !s.checkExists(sr.graph) {
-		return recResp{}, errStoryNotFound
-	}
-	s = storyByKey(sr.graph, s.key())
+func recommendationStory(sr *server, keys []string, limit, offset int) (recResp, error) {
+	s := storyByKey(sr.graph, keys[0])
 	log.Printf("Finding recommendations for \"%s\"...", s.Title)
-	recStories := make(map[string]int)
+	recStories := make(map[string]float64)
 
-	it, _ := cayley.StartPath(sr.graph, s.key()).Out(StoryFavoritedBy).In(StoryFavoritedBy).BuildIterator().Optimize()
+	it, _ := cayley.StartPath(sr.graph, keys...).Out(StoryFavoritedBy).In(StoryFavoritedBy).BuildIterator().Optimize()
 	defer it.Close()
 
 	for cayley.RawNext(it) {
@@ -184,14 +203,41 @@ func recommendationStory(sr *server, s Story, limit, offset int) (recResp, error
 		recStories[stID]++
 	}
 
-	favorites := 0
-	for _, count := range recStories {
-		favorites += count
+	// Remove favorites pointing to original story.
+	for _, key := range keys {
+		delete(recStories, key)
 	}
 
-	rsl := sortMap(recStories, limit+offset)
-	if len(rsl) > 1 && rsl[0] == s.key() {
-		rsl = rsl[1:]
+	favorites := 0
+	for _, count := range recStories {
+		favorites += int(count)
+	}
+
+	stories := make([]string, 0, len(recStories))
+	for st := range recStories {
+		stories = append(stories, st)
+	}
+
+	/*
+		// Weight stories by sum of shared favorites * log(# favorites) / # favorites
+		it2, _ := cayley.StartPath(sr.graph, stories...).Save(StoryFavorites, StoryFavorites).BuildIterator().Optimize()
+		defer it2.Close()
+		for i := 0; cayley.RawNext(it2); i++ {
+			story := stories[i]
+			results := map[string]graph.Value{}
+			it2.TagResults(results)
+			favorites := float64(atoi(sr.graph.NameOf(results[StoryFavorites])))
+			if favorites == 0 {
+				continue
+			}
+			val := recStories[story]
+			recStories[story] = val * math.Log(val) / favorites
+		}
+	*/
+
+	rsl := sortMap(recStories)
+	if len(rsl) != len(stories) {
+		log.Fatalf("len(rsl) = %d, len(stories) = %d", len(rsl), len(stories))
 	}
 	storyCount := len(rsl)
 	if len(rsl) > (limit + offset) {
@@ -202,8 +248,9 @@ func recommendationStory(sr *server, s Story, limit, offset int) (recResp, error
 		rsl = nil
 	}
 	sOut := storiesByKeys(sr.graph, rsl)
-	for _, st := range sOut {
+	for i, st := range sOut {
 		st.annotate()
+		st.Score = float32(recStories[rsl[i]])
 	}
 	s.annotate()
 	resp := recResp{

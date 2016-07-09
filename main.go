@@ -54,33 +54,32 @@ func (s *server) cmdGet(bucket, key string) {
 
 type storySlice struct {
 	arr []string
-	m   map[string]int
+	m   map[string]float64
 }
 
 func (a *storySlice) Len() int           { return len(a.arr) }
 func (a *storySlice) Swap(i, j int)      { a.arr[i], a.arr[j] = a.arr[j], a.arr[i] }
 func (a *storySlice) Less(i, j int) bool { return a.m[a.arr[i]] > a.m[a.arr[j]] }
 
-// sortMap returns the top limit items in a map.
-func sortMap(m map[string]int, limit int) []string {
+// sortMap returns the items in a map.
+func sortMap(m map[string]float64) []string {
 	ss := &storySlice{
-		m: m,
+		m:   m,
+		arr: make([]string, 0, len(m)),
 	}
-	for k, priority := range m {
-		if len(ss.arr) > limit && priority <= 1 {
-			continue
-		}
+	for k := range m {
 		ss.arr = append(ss.arr, k)
 	}
 	sort.Sort(ss)
 	return ss.arr
 }
 
-var recommenders []func(s *server, url string, limit, offset int) (recResp, error)
+var recommenders []func(s *server, urls []string, limit, offset int) (recResp, error)
 
 func (s *server) recommendations(url string, limit, offset int) (recResp, error) {
+	urls := strings.Split(url, "|")
 	for _, rec := range recommenders {
-		resp, err := rec(s, url, limit, offset)
+		resp, err := rec(s, urls, limit, offset)
 		if err == errStoryNotFound {
 			continue
 		} else if err != nil {
