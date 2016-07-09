@@ -28,10 +28,10 @@ func (s *Story) annotate() {
 	switch s.Site {
 	case Site_FFNET:
 		s.Url = "https://www.fanfiction.net/s/" + itoa(s.Id) + "/" + strings.Replace(s.Title, " ", "-", -1)
-		s.Dl = "http://ficsave.com/?format=epub&e=&auto_download=yes&story_url=" + s.Url
+		s.Dl = "http://ficsave.xyz/?format=epub&e=&download=yes&url=" + s.Url
 	case Site_FICTIONPRESS:
 		s.Url = "https://www.fictionpress.com/s/" + itoa(s.Id) + "/" + strings.Replace(s.Title, " ", "-", -1)
-		s.Dl = "http://ficsave.com/?format=epub&e=&auto_download=yes&story_url=" + s.Url
+		s.Dl = "http://ficsave.xyz/?format=epub&e=&download=yes&url=" + s.Url
 	case Site_AO3:
 		s.Url = "https://archiveofourown.org/works/" + itoa(s.Id)
 		s.Dl = "https://archiveofourown.org/downloads/a/a/" + itoa(s.Id) + "/a.epub"
