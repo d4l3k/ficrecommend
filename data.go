@@ -209,7 +209,7 @@ func recommendationStory(sr *server, keys []string, limit, offset int) (recResp,
 	}{
 		{
 			fmt.Sprintf("%q -> %q", StoryFavoritedBy, UserFavoriteStory),
-			path.StartMorphism(keys...).Out(StoryFavoritedBy).Out(StoryFavoritedBy),
+			path.StartMorphism(keys...).Out(StoryFavoritedBy).Out(UserFavoriteStory),
 		},
 		{
 			fmt.Sprintf("%q -> %q", StoryFavoritedBy, UserStory),
