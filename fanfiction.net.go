@@ -22,7 +22,7 @@ var ffnetRegex = regexp.MustCompile(`^https?:\/\/.*fanfiction\.net\/s\/(\d+).*$`
 var fictionPressRegex = regexp.MustCompile(`^https?:\/\/.*fictionpress\.com\/s\/(\d+).*$`)
 
 func recommendFFnet(s *server, urls []string, limit, offset int) (recResp, error) {
-	return recommendGeneric(s, urls, limit, offset, ffnetRegex)
+	return recommendGeneric(s, urls, limit, offset, ffnetRegex, Site_FFNET)
 }
 
 func scrapeFFnet(s *server) {
@@ -30,7 +30,7 @@ func scrapeFFnet(s *server) {
 }
 
 func recommendFictionPress(s *server, urls []string, limit, offset int) (recResp, error) {
-	return recommendGeneric(s, urls, limit, offset, fictionPressRegex)
+	return recommendGeneric(s, urls, limit, offset, fictionPressRegex, Site_FICTIONPRESS)
 }
 
 func scrapeFictionPress(s *server) {

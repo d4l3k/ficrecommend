@@ -22,20 +22,7 @@ func init() {
 var ao3Regex = regexp.MustCompile(`^https?:\/\/archiveofourown.org\/works\/(\d+).*$`)
 
 func recommendAO3(s *server, urls []string, limit, offset int) (recResp, error) {
-	var matches []string
-	for _, url := range urls {
-		if submatches := ao3Regex.FindStringSubmatch(url); len(submatches) == 2 {
-			st := Story{
-				Id:   atoi(submatches[1]),
-				Site: Site_AO3,
-			}
-			matches = append(matches, st.key())
-		}
-	}
-	if len(matches) > 0 {
-		return recommendationStory(s, matches, limit, offset)
-	}
-	return recResp{}, errStoryNotFound
+	return recommendGeneric(s, urls, limit, offset, ao3Regex, Site_AO3)
 }
 
 func getLatestAO3() (int, error) {

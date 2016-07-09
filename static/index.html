@@ -85,6 +85,9 @@
     .card div.row .col {
       padding-left: 0;
     }
+    .card .card-content p {
+      padding: 10px 0;
+    }
     @media (max-width: 600px) {
       #container .container {
         width: 100%;
@@ -110,7 +113,16 @@
       <div class="row">
         <div id="input" class="card col offset-l3 l6 m10 offset-m1 s12">
           <div class="card-content">
-            <span class="card-title grey-text text-darken-4">Enter a FF.net or AO3 URL</span>
+            <span class="card-title grey-text text-darken-4">Story URL</span>
+            <p>
+            Fic Recommend finds stories with a high percentage of users who both favorited, or kudoed a provided story.
+            Supports
+            <a href="https://www.fanfiction.net">FanFiction.net</a>,
+            <a href="https://www.fictionpress.com">FictionPress.com</a>,
+            and
+            <a href="https://archiveofourown.org">Archive of Our Own</a>.
+ For more focused results you can enter two URLs separated by a "|".
+            </p>
             <div class="input-field">
               <input id="url" type="url" class="validate">
               <label for="url" data-error="Invalid URL">Story</label>
@@ -122,7 +134,7 @@
               </button>
 
               <a class="btn waves-effect blue waves-light" href="javascript:(function(){
-                  if(!window.location.toString().match(/^https?:\/\/((www|m)\.?fanfiction.net\/s\/.*|archiveofourown.org\/works\/.*)$/)) {
+                  if(!window.location.toString().match(/^https?:\/\/((www|m)\.?(fanfiction.net|fictionpress.com)\/s\/.*|archiveofourown.org\/works\/.*)$/)) {
                     alert('Save this into your bookmarks and click while on a fanfic!');
                     return;
                   }

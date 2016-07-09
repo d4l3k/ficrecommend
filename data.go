@@ -161,15 +161,17 @@ func (s Story) save(sr *server) error {
 	return sr.graph.ApplyTransaction(txn)
 }
 
-func recommendGeneric(s *server, urls []string, limit, offset int, reg *regexp.Regexp) (recResp, error) {
+func recommendGeneric(s *server, urls []string, limit, offset int, reg *regexp.Regexp, site Site) (recResp, error) {
 	var matches []string
 	for _, url := range urls {
 		if submatches := reg.FindStringSubmatch(url); len(submatches) == 2 {
 			st := Story{
 				Id:   atoi(submatches[1]),
-				Site: Site_FFNET,
+				Site: site,
 			}
-			matches = append(matches, st.key())
+			if st.checkExistsTitle(s.graph) {
+				matches = append(matches, st.key())
+			}
 		}
 	}
 	if len(matches) > 0 {
