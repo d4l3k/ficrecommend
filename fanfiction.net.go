@@ -111,13 +111,16 @@ func (u *User) fetch(doc *goquery.Document, sr *server, site Site) error {
 	}
 	u.Exists = true
 	u.Name = strings.TrimSpace(doc.Find("#content_wrapper_inner span").First().Text())
-	var err error
-	st := Story{
-		Site:   site,
-		Exists: true,
-	}
+
+	var stories []Story
 	for _, typ := range []string{".favstories", ".mystories"} {
+		stories = stories[:0]
+
 		doc.Find(typ).Each(func(i int, s *goquery.Selection) {
+			st := Story{
+				Site:   site,
+				Exists: true,
+			}
 			st.Id = atoi(s.AttrOr("data-storyid", ""))
 			st.Category = s.AttrOr("data-category", "")
 			st.Title = s.AttrOr("data-title", "")
@@ -137,22 +140,28 @@ func (u *User) fetch(doc *goquery.Document, sr *server, site Site) error {
 			if len(matches) == 2 {
 				st.Favorites = atoi(strings.Replace(matches[1], ",", "", -1))
 			}
-
-			if !st.checkExistsTitle(sr) {
-				err = st.save(sr)
-				if err != nil {
-					return
-				}
-			}
 			switch typ {
 			case ".favstories":
 				u.FavStories = append(u.FavStories, string(st.key()))
 			case ".mystories":
 				u.Stories = append(u.Stories, string(st.key()))
 			}
+			stories = append(stories, st)
 		})
-		if err != nil {
-			return err
+		for _, st := range stories {
+			if st.checkExistsTitle(sr) {
+				st2, err := sr.storyByKey(st.key())
+				if err != nil {
+					return err
+				}
+				st.FavedBy = st2.FavedBy
+			}
+			if !strContains(st.FavedBy, u.key()) {
+				st.FavedBy = append(st.FavedBy, u.key())
+			}
+			if err := st.save(sr); err != nil {
+				return err
+			}
 		}
 	}
 	doc.Find("#fa a").Each(func(i int, s *goquery.Selection) {

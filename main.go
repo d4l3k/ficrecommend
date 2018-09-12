@@ -8,8 +8,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -17,6 +15,7 @@ import (
 	_ "net/http/pprof"
 
 	"github.com/dgraph-io/badger"
+	"github.com/pkg/errors"
 )
 
 // FakeUserAgent is the user agent to use when making requests.
@@ -44,17 +43,20 @@ func itoa(i int32) string {
 	return strconv.Itoa(int(i))
 }
 
-func (s *server) cmdGet(bucket, key string) {
+func (s *server) cmdGet(bucket, key string) error {
 	var v interface{}
 	var err error
 	switch bucket {
 	case "stories":
 		v, err = s.storyByKey(key)
 		if err != nil {
-			log.Fatal(err)
+			return err
 		}
+	default:
+		return errors.Errorf("unknown bucket: %q", bucket)
 	}
 	fmt.Printf("key=%s, value=%+v\n", key, v)
+	return nil
 }
 
 type storySlice struct {
@@ -189,10 +191,6 @@ func newServer() (*server, error) {
 	}
 	s.db = db
 
-	if *scrape {
-		s.startScraping()
-	}
-
 	return s, nil
 }
 
@@ -205,15 +203,30 @@ func (s *server) startScraping() {
 
 // Setup registers all server handlers.
 func main() {
-	runtime.GOMAXPROCS(runtime.NumCPU())
+	if err := run(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func run() error {
 	log.SetFlags(log.Flags() | log.Lshortfile)
 	flag.Parse()
 
 	s, err := newServer()
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	defer s.db.Close()
+
+	args := flag.Args()
+	log.Println(args)
+	if len(args) > 0 {
+		return s.cmdGet(args[0], args[1])
+	}
+
+	if *scrape {
+		s.startScraping()
+	}
 
 	fs := http.FileServer(http.Dir("."))
 	http.Handle("/static/", fs)
@@ -223,12 +236,5 @@ func main() {
 
 	log.Printf("Serving on :%s...", *port)
 
-	err = http.ListenAndServe("0.0.0.0:"+*port, nil)
-	if err != nil {
-		log.Println(err)
-	}
-	log.Println("Server on 6060 stopped")
-
-	os.Exit(0)
-
+	return http.ListenAndServe("0.0.0.0:"+*port, nil)
 }

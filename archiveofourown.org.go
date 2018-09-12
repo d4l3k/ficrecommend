@@ -175,12 +175,22 @@ func fetchAO3(s *Story, doc *goquery.Document, sr *server) error {
 		name := strings.ToLower(sel.Text())
 		u.Id = name
 		u.Name = name
-		u.FavStories = []string{s.key()}
-		if !u.checkExists(sr) {
-			err = u.save(sr)
+		if u.checkExists(sr) {
+			var u2 User
+			u2, err = sr.userByKey(u.key())
 			if err != nil {
 				return
 			}
+			u.FavAuthors = u2.FavAuthors
+			u.FavStories = u2.FavStories
+			u.FavedBy = u2.FavedBy
+		}
+		if !strContains(u.FavStories, s.key()) {
+			u.FavStories = append(u.FavStories, s.key())
+		}
+		err = u.save(sr)
+		if err != nil {
+			return
 		}
 	})
 	if err != nil {

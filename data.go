@@ -141,6 +141,17 @@ func (s *server) storiesByKeys(keys []string) ([]*Story, error) {
 	return stories, nil
 }
 
+func (s *server) userByKey(key string) (User, error) {
+	arr, err := s.usersByKeys([]string{key})
+	if err != nil {
+		return User{}, err
+	}
+	if len(arr) > 0 {
+		return *arr[0], nil
+	}
+	return User{}, errors.Errorf("not found")
+}
+
 func (s *server) usersByKeys(keys []string) ([]*User, error) {
 	arr := make([]*User, 0, len(keys))
 
