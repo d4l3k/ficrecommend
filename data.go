@@ -1,16 +1,12 @@
 package main
 
 import (
-	"errors"
 	"log"
 	"regexp"
-	"strconv"
 	"time"
 
-	"github.com/cayleygraph/cayley"
-	"github.com/cayleygraph/cayley/graph"
-	"github.com/cayleygraph/cayley/graph/path"
-	"github.com/cayleygraph/cayley/quad"
+	"github.com/dgraph-io/badger"
+	"github.com/pkg/errors"
 )
 
 var errStoryNotFound = errors.New("story not found in database")
@@ -60,22 +56,36 @@ const (
 	StoryFavoritedBy = storyPrefix + "favorited_by"
 )
 
-func (u User) checkExists(g *cayley.Handle) bool {
-	it, _ := cayley.StartPath(g, u.key()).Out(UserID).BuildIterator().Optimize()
-	defer it.Close()
-	return cayley.RawNext(it)
+func (s *server) keyExists(key string) bool {
+	err := s.db.View(func(txn *badger.Txn) error {
+		_, err := txn.Get([]byte(key))
+		return err
+	})
+	if err == nil {
+		return true
+	} else if err == badger.ErrKeyNotFound {
+		return false
+	}
+	panic(err)
 }
 
-func (s Story) checkExists(g *cayley.Handle) bool {
-	it, _ := cayley.StartPath(g, s.key()).Out(StoryID).BuildIterator().Optimize()
-	defer it.Close()
-	return cayley.RawNext(it)
+func (u User) checkExists(s *server) bool {
+	return s.keyExists(u.key())
 }
 
-func (s Story) checkExistsTitle(g *cayley.Handle) bool {
-	it, _ := cayley.StartPath(g, s.key()).Out(StoryTitle).BuildIterator().Optimize()
-	defer it.Close()
-	return cayley.RawNext(it)
+func (s Story) checkExists(sr *server) bool {
+	return sr.keyExists(s.key())
+}
+
+func (s Story) checkExistsTitle(sr *server) bool {
+	story, err := sr.storyByKey(s.key())
+	if err == badger.ErrKeyNotFound {
+		return false
+	} else if err != nil {
+		panic(err)
+	}
+
+	return len(story.Title) > 0
 }
 
 func (u User) key() string {
@@ -84,84 +94,101 @@ func (u User) key() string {
 
 func (u User) save(s *server) error {
 	id := u.key()
-	txn := graph.NewTransaction()
-	txn.AddQuad(quad.Quad{Subject: id, Predicate: TypeType, Object: TypeUser})
-	txn.AddQuad(quad.Quad{Subject: id, Predicate: UserID, Object: u.Id})
-	txn.AddQuad(quad.Quad{Subject: id, Predicate: SiteID, Object: Site_name[int32(u.Site)]})
-	if u.Exists {
-		txn.AddQuad(quad.Quad{Subject: id, Predicate: UserName, Object: u.Name})
-		for _, story := range u.Stories {
-			txn.AddQuad(quad.Quad{Subject: id, Predicate: UserStory, Object: story})
-			txn.AddQuad(quad.Quad{Subject: story, Predicate: StoryAuthor, Object: id})
-		}
-		for _, story := range u.FavStories {
-			txn.AddQuad(quad.Quad{Subject: id, Predicate: UserFavoriteStory, Object: story})
-			txn.AddQuad(quad.Quad{Subject: story, Predicate: StoryFavoritedBy, Object: id})
-		}
-		for _, author := range u.FavAuthors {
-			txn.AddQuad(quad.Quad{Subject: id, Predicate: UserFavoriteAuthor, Object: author})
-			txn.AddQuad(quad.Quad{Subject: author, Predicate: UserFavoritedBy, Object: id})
-		}
+	body, err := u.Marshal()
+	if err != nil {
+		return err
 	}
-	return s.graph.ApplyTransaction(txn)
+	return s.db.Update(func(txn *badger.Txn) error {
+		return txn.Set([]byte(id), body)
+	})
 }
 
-func storyByKey(g *cayley.Handle, key string) Story {
-	stories := storiesByKeys(g, []string{key})
+func (s *server) storyByKey(key string) (Story, error) {
+	stories, err := s.storiesByKeys([]string{key})
+	if err != nil {
+		return Story{}, err
+	}
 	if len(stories) > 0 {
-		return *stories[0]
+		return *stories[0], nil
 	}
-	return Story{}
+	return Story{}, errors.Errorf("not found")
 }
 
-func storiesByKeys(g *cayley.Handle, keys []string) []*Story {
+func (s *server) storiesByKeys(keys []string) ([]*Story, error) {
 	stories := make([]*Story, 0, len(keys))
-	it, _ := cayley.StartPath(g, keys...).Save(StoryID, StoryID).Save(StoryTitle, StoryTitle).Save(StoryDescription, StoryDescription).Save(SiteID, SiteID).BuildIterator().Optimize()
-	defer it.Close()
-	for cayley.RawNext(it) {
-		s := Story{}
-		results := map[string]graph.Value{}
-		it.TagResults(results)
-		s.Id = atoi(g.NameOf(results[StoryID]))
-		s.Title = g.NameOf(results[StoryTitle])
-		s.Desc = g.NameOf(results[StoryDescription])
-		s.Site = Site(Site_value[g.NameOf(results[SiteID])])
-		s.annotate()
-		stories = append(stories, &s)
+
+	if err := s.db.View(func(txn *badger.Txn) error {
+		for _, key := range keys {
+			item, err := txn.Get([]byte(key))
+			if err != nil {
+				return err
+			}
+			body, err := item.Value()
+			if err != nil {
+				return err
+			}
+			s := Story{}
+			if err := s.Unmarshal(body); err != nil {
+				return err
+			}
+			s.annotate()
+			stories = append(stories, &s)
+		}
+		return nil
+	}); err != nil {
+		return nil, err
 	}
-	return stories
+	return stories, nil
+}
+
+func (s *server) usersByKeys(keys []string) ([]*User, error) {
+	arr := make([]*User, 0, len(keys))
+
+	if err := s.db.View(func(txn *badger.Txn) error {
+		for _, key := range keys {
+			item, err := txn.Get([]byte(key))
+			if err != nil {
+				return err
+			}
+			body, err := item.Value()
+			if err != nil {
+				return err
+			}
+			v := User{}
+			if err := v.Unmarshal(body); err != nil {
+				return err
+			}
+			arr = append(arr, &v)
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return arr, nil
 }
 
 func (s Story) key() string {
 	return "story:" + Site_name[int32(s.Site)] + ":" + itoa(s.Id)
 }
 
-func (s Story) save(sr *server) error {
-	id := s.key()
-	txn := graph.NewTransaction()
-	txn.AddQuad(quad.Quad{Subject: id, Predicate: TypeType, Object: TypeStory})
-	txn.AddQuad(quad.Quad{Subject: id, Predicate: StoryID, Object: itoa(s.Id)})
-	txn.AddQuad(quad.Quad{Subject: id, Predicate: SiteID, Object: Site_name[int32(s.Site)]})
-	if s.Exists {
-		txn.AddQuad(quad.Quad{Subject: id, Predicate: StoryTitle, Object: s.Title})
-		txn.AddQuad(quad.Quad{Subject: id, Predicate: StoryCategory, Object: s.Category})
-		txn.AddQuad(quad.Quad{Subject: id, Predicate: StoryImage, Object: s.Image})
-		txn.AddQuad(quad.Quad{Subject: id, Predicate: StoryDescription, Object: s.Desc})
-		txn.AddQuad(quad.Quad{Subject: id, Predicate: StoryURL, Object: s.Url})
-		txn.AddQuad(quad.Quad{Subject: id, Predicate: StoryDL, Object: s.Dl})
-		txn.AddQuad(quad.Quad{Subject: id, Predicate: StoryWordCount, Object: itoa(s.WordCount)})
-		txn.AddQuad(quad.Quad{Subject: id, Predicate: StoryDateSubmit, Object: itoa(s.DateSubmit)})
-		txn.AddQuad(quad.Quad{Subject: id, Predicate: StoryDateUpdate, Object: itoa(s.DateUpdate)})
-		txn.AddQuad(quad.Quad{Subject: id, Predicate: StoryReviewCount, Object: itoa(s.Reviews)})
-		txn.AddQuad(quad.Quad{Subject: id, Predicate: StoryChapters, Object: itoa(s.Chapters)})
-		txn.AddQuad(quad.Quad{Subject: id, Predicate: StoryFavorites, Object: itoa(s.Favorites)})
-		txn.AddQuad(quad.Quad{Subject: id, Predicate: StoryComplete, Object: strconv.FormatBool(s.Complete)})
-		for _, by := range s.FavedBy {
-			txn.AddQuad(quad.Quad{Subject: id, Predicate: StoryFavoritedBy, Object: by})
-			txn.AddQuad(quad.Quad{Subject: by, Predicate: UserFavoriteStory, Object: id})
+func strContains(arr []string, str string) bool {
+	for _, s := range arr {
+		if s == str {
+			return true
 		}
 	}
-	return sr.graph.ApplyTransaction(txn)
+	return false
+}
+
+func (s Story) save(sr *server) error {
+	id := s.key()
+	body, err := s.Marshal()
+	if err != nil {
+		return err
+	}
+	return sr.db.Update(func(txn *badger.Txn) error {
+		return txn.Set([]byte(id), body)
+	})
 }
 
 func recommendGeneric(s *server, urls []string, limit, offset int, reg *regexp.Regexp, site Site) (recResp, error) {
@@ -172,7 +199,7 @@ func recommendGeneric(s *server, urls []string, limit, offset int, reg *regexp.R
 				Id:   atoi(submatches[1]),
 				Site: site,
 			}
-			if st.checkExistsTitle(s.graph) {
+			if st.checkExistsTitle(s) {
 				matches = append(matches, st.key())
 			}
 		}
@@ -198,67 +225,23 @@ type respStats struct {
 
 func recommendationStory(sr *server, keys []string, limit, offset int) (recResp, error) {
 	start := time.Now()
-	g := sr.graph
-	s := storyByKey(g, keys[0])
+	s, err := sr.storyByKey(keys[0])
+	if err != nil {
+		return recResp{}, err
+	}
 	log.Printf("Finding recommendations for \"%s\"...", s.Title)
 	recStories := make(map[string]float64)
 
 	// Fetch users first.
-	paths := []struct {
-		desc string
-		path *path.Path
-	}{
-		{
-			StoryFavoritedBy,
-			path.StartMorphism(keys...).Out(StoryFavoritedBy),
-		},
-		{
-			StoryAuthor,
-			path.StartMorphism(keys...).Out(StoryAuthor),
-		},
+	users, err := sr.usersByKeys(s.FavedBy)
+	if err != nil {
+		return recResp{}, err
 	}
-	var users []string
-	for _, path := range paths {
-		startOpt := time.Now()
-		it, _ := path.path.BuildIteratorOn(g).Optimize()
-		defer it.Close()
-		log.Printf("%s: BuildIterator().Optimize() took %s", path.desc, time.Now().Sub(startOpt))
 
-		startFetch := time.Now()
-		nexter := it.(graph.Nexter)
-		for nexter.Next() {
-			users = append(users, g.NameOf(it.Result()))
+	for _, user := range users {
+		for _, story := range user.FavStories {
+			recStories[story]++
 		}
-		log.Printf("%s: cayley.RawNext(it) took %s", path.desc, time.Now().Sub(startFetch))
-	}
-
-	// Fetch users' stories and favorites.
-	paths2 := []struct {
-		desc string
-		path *path.Path
-	}{
-		{
-			UserFavoriteStory,
-			path.StartMorphism(users...).Out(UserFavoriteStory),
-		},
-		{
-			UserStory,
-			path.StartMorphism(users...).Out(UserStory),
-		},
-	}
-	for _, path := range paths2 {
-		startOpt := time.Now()
-		it, _ := path.path.BuildIteratorOn(g).Optimize()
-		defer it.Close()
-		log.Printf("%s: BuildIterator().Optimize() took %s", path.desc, time.Now().Sub(startOpt))
-
-		startFetch := time.Now()
-		nexter := it.(graph.Nexter)
-		for nexter.Next() {
-			stID := g.NameOf(it.Result())
-			recStories[stID]++
-		}
-		log.Printf("%s: cayley.RawNext(it) took %s", path.desc, time.Now().Sub(startFetch))
 	}
 
 	// Remove favorites pointing to original story.
@@ -276,23 +259,6 @@ func recommendationStory(sr *server, keys []string, limit, offset int) (recResp,
 		stories = append(stories, st)
 	}
 
-	/*
-		// Weight stories by sum of shared favorites * log(# favorites) / # favorites
-		it2, _ := cayley.StartPath(g, stories...).Save(StoryFavorites, StoryFavorites).BuildIterator().Optimize()
-		defer it2.Close()
-		for i := 0; cayley.RawNext(it2); i++ {
-			story := stories[i]
-			results := map[string]graph.Value{}
-			it2.TagResults(results)
-			favorites := float64(atoi(g.NameOf(results[StoryFavorites])))
-			if favorites == 0 {
-				continue
-			}
-			val := recStories[story]
-			recStories[story] = val * math.Log(val) / favorites
-		}
-	*/
-
 	rsl := sortMap(recStories)
 	if len(rsl) != len(stories) {
 		log.Fatalf("len(rsl) = %d, len(stories) = %d", len(rsl), len(stories))
@@ -306,7 +272,10 @@ func recommendationStory(sr *server, keys []string, limit, offset int) (recResp,
 		rsl = nil
 	}
 	startStories := time.Now()
-	sOut := storiesByKeys(g, rsl)
+	sOut, err := sr.storiesByKeys(rsl)
+	if err != nil {
+		return recResp{}, err
+	}
 	log.Printf("storiesByKeys(len = %d) took %s", len(rsl), time.Now().Sub(startStories))
 	for i, st := range sOut {
 		st.annotate()

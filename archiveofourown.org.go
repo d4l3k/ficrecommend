@@ -22,7 +22,7 @@ func init() {
 var ao3Regex = regexp.MustCompile(`^https?:\/\/archiveofourown.org\/works\/(\d+).*$`)
 
 func recommendAO3(s *server, urls []string, limit, offset int) (recResp, error) {
-	return recommendGeneric(s, urls, limit, offset, ao3Regex, Site_AO3)
+	return recommendGeneric(s, urls, limit, offset, ao3Regex, AO3)
 }
 
 func getLatestAO3() (int, error) {
@@ -115,11 +115,11 @@ func scrapeAO3(sr *server) {
 			}
 			u := &Story{
 				Id:   i,
-				Site: Site_AO3,
+				Site: AO3,
 			}
 			i++
 			fetched++
-			if u.checkExists(sr.graph) {
+			if u.checkExists(sr) {
 				continue
 			}
 			//time.Sleep(time.Second / 2)
@@ -161,7 +161,7 @@ func fetchAO3(s *Story, doc *goquery.Document, sr *server) error {
 
 	var err error
 	u := User{
-		Site:   Site_AO3,
+		Site:   AO3,
 		Exists: true,
 	}
 	doc.Find("#kudos a").Each(func(i int, sel *goquery.Selection) {
@@ -176,7 +176,7 @@ func fetchAO3(s *Story, doc *goquery.Document, sr *server) error {
 		u.Id = name
 		u.Name = name
 		u.FavStories = []string{s.key()}
-		if !u.checkExists(sr.graph) {
+		if !u.checkExists(sr) {
 			err = u.save(sr)
 			if err != nil {
 				return

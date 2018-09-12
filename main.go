@@ -1,6 +1,6 @@
 package main
 
-//go:generate protoc --go_out=. main.proto
+//go:generate protoc --gogoslick_out=. main.proto
 
 import (
 	"encoding/json"
@@ -16,9 +16,7 @@ import (
 
 	_ "net/http/pprof"
 
-	"github.com/cayleygraph/cayley"
-	"github.com/cayleygraph/cayley/graph"
-	_ "github.com/cayleygraph/cayley/graph/leveldb"
+	"github.com/dgraph-io/badger"
 )
 
 // FakeUserAgent is the user agent to use when making requests.
@@ -26,13 +24,13 @@ const FakeUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_5) AppleWebK
 
 func (s *Story) annotate() {
 	switch s.Site {
-	case Site_FFNET:
+	case FFNET:
 		s.Url = "https://www.fanfiction.net/s/" + itoa(s.Id) + "/" + strings.Replace(s.Title, " ", "-", -1)
 		s.Dl = "http://ficsave.xyz/?format=epub&e=&download=yes&url=" + s.Url
-	case Site_FICTIONPRESS:
+	case FICTIONPRESS:
 		s.Url = "https://www.fictionpress.com/s/" + itoa(s.Id) + "/" + strings.Replace(s.Title, " ", "-", -1)
 		s.Dl = "http://ficsave.xyz/?format=epub&e=&download=yes&url=" + s.Url
-	case Site_AO3:
+	case AO3:
 		s.Url = "https://archiveofourown.org/works/" + itoa(s.Id)
 		s.Dl = "https://archiveofourown.org/downloads/a/a/" + itoa(s.Id) + "/a.epub"
 	}
@@ -48,9 +46,13 @@ func itoa(i int32) string {
 
 func (s *server) cmdGet(bucket, key string) {
 	var v interface{}
+	var err error
 	switch bucket {
 	case "stories":
-		v = storyByKey(s.graph, key)
+		v, err = s.storyByKey(key)
+		if err != nil {
+			log.Fatal(err)
+		}
 	}
 	fmt.Printf("key=%s, value=%+v\n", key, v)
 }
@@ -164,35 +166,28 @@ func (s *server) handleRecommendation(w http.ResponseWriter, r *http.Request) {
 var (
 	scrape = flag.Bool("scrape", true, "whether to scrape sites")
 	port   = flag.String("port", "6060", "port to run on")
-	dbpath = flag.String("dbpath", "./recommender.leveldb", "database directory")
+	dbpath = flag.String("dbpath", "./recommender.badger", "database directory")
 )
 
-func loadGraph(path string) (*cayley.Handle, error) {
-	*graph.IgnoreDup = true
-
-	err := graph.InitQuadStore("leveldb", path, map[string]interface{}{
-		"ignore_duplicate": true,
-	})
-	if err == graph.ErrDatabaseExists {
-		log.Print(err)
-	} else if err != nil {
-		return nil, err
-	}
-	return cayley.NewGraph("leveldb", path, nil)
+func loadDB(path string) (*badger.DB, error) {
+	opts := badger.DefaultOptions
+	opts.Dir = path
+	opts.ValueDir = path
+	return badger.Open(opts)
 }
 
 type server struct {
-	graph *cayley.Handle
+	db *badger.DB
 }
 
 func newServer() (*server, error) {
 	s := &server{}
 
-	g, err := loadGraph(*dbpath)
+	db, err := loadDB(*dbpath)
 	if err != nil {
 		return nil, err
 	}
-	s.graph = g
+	s.db = db
 
 	if *scrape {
 		s.startScraping()
@@ -218,7 +213,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer s.graph.Close()
+	defer s.db.Close()
 
 	fs := http.FileServer(http.Dir("."))
 	http.Handle("/static/", fs)

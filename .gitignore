@@ -1,3 +1,4 @@
 *.db
 ficrecommend
-recommender.leveldb
+*.leveldb
+*.badger

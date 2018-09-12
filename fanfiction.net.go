@@ -22,19 +22,19 @@ var ffnetRegex = regexp.MustCompile(`^https?:\/\/.*fanfiction\.net\/s\/(\d+).*$`
 var fictionPressRegex = regexp.MustCompile(`^https?:\/\/.*fictionpress\.com\/s\/(\d+).*$`)
 
 func recommendFFnet(s *server, urls []string, limit, offset int) (recResp, error) {
-	return recommendGeneric(s, urls, limit, offset, ffnetRegex, Site_FFNET)
+	return recommendGeneric(s, urls, limit, offset, ffnetRegex, FFNET)
 }
 
 func scrapeFFnet(s *server) {
-	scrapeFFGroup(s, "www.fanfiction.net", Site_FFNET, 8043930)
+	scrapeFFGroup(s, "www.fanfiction.net", FFNET, 8043930)
 }
 
 func recommendFictionPress(s *server, urls []string, limit, offset int) (recResp, error) {
-	return recommendGeneric(s, urls, limit, offset, fictionPressRegex, Site_FICTIONPRESS)
+	return recommendGeneric(s, urls, limit, offset, fictionPressRegex, FICTIONPRESS)
 }
 
 func scrapeFictionPress(s *server) {
-	scrapeFFGroup(s, "www.fictionpress.com", Site_FICTIONPRESS, 1067244)
+	scrapeFFGroup(s, "www.fictionpress.com", FICTIONPRESS, 1067244)
 }
 
 func scrapeFFGroup(s *server, domain string, site Site, total int) {
@@ -81,7 +81,7 @@ func scrapeFFGroup(s *server, domain string, site Site, total int) {
 				Id:   itoa(int32(rand.Intn(total))),
 				Site: site,
 			}
-			if u.checkExists(s.graph) {
+			if u.checkExists(s) {
 				continue
 			}
 			//time.Sleep(time.Second)
@@ -138,7 +138,7 @@ func (u *User) fetch(doc *goquery.Document, sr *server, site Site) error {
 				st.Favorites = atoi(strings.Replace(matches[1], ",", "", -1))
 			}
 
-			if !st.checkExistsTitle(sr.graph) {
+			if !st.checkExistsTitle(sr) {
 				err = st.save(sr)
 				if err != nil {
 					return
